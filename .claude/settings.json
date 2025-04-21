@@ -1,0 +1,19 @@
+{
+    "allowedTools": [
+        "Bash(cat:*)",
+        "Bash(ls:*)",
+        "Bash(mkdir:*)",
+        "Bash(mv:*)",
+        "Bash(uv add:*)",
+        "Bash(uv run:*)",
+        "Bash(python:*)",
+        "Bash(python3:*)",
+        "Bash(sh:*)",
+        "Bash(*)",
+        "Zsh(*)"
+    ],
+    "history": [],
+    "dontCrawlDirectory": false,
+    "mcpContextUris": [],
+    "ignorePatterns": []
+}

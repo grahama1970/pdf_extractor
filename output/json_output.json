@@ -1,0 +1,61 @@
+[
+  {
+    "type": "table",
+    "content": "[[\"Signal\", \"IO\", \"Descripti \\non\", \"connexi \\non\", \"Type\"]]",
+    "metadata": {
+      "page": 1,
+      "rows": 1,
+      "cols": 5,
+      "accuracy": 100.0,
+      "bbox": [
+        71.03999999999999,
+        105.56800969403211,
+        542.4,
+        181.62496213268707
+      ]
+    },
+    "children": [],
+    "table_id": "002af281-be6f-4f25-aabf-ac313a211ab8",
+    "file_path": "/home/graham/workspace/experiments/pdf_extractor/src/mcp_doc_retriever/context7/pdf_extractor/input/BHT_CV32A65X.pdf",
+    "repo_link": "https://github.com/example/repo",
+    "section_path": [
+      "1. Document"
+    ]
+  },
+  {
+    "type": "table",
+    "content": "[[\"clk_i\", \"in \\nin \\nin \\nou \\nt\", \"Subsyste \\nm Clock\", \"SUBSY \\nSTEM\", \"logic\"], [\"rst_ni\", \"\", \"Asynchro \\nnous reset \\nactive low\", \"SUBSY \\nSTEM\", \"logic\"], [\"vpc_i \\nin \\nVirtual PC \\nCACHE \\nlogic[CVA6Cfg.VLEN-1:0]\", \"\", \"\", \"\", \"\"], [\"bht_updat \\ne_i\", \"\", \"Update \\nbht with \\nresolved \\naddress\", \"EXECU \\nTE\", \"bht_update_t\"], [\"bht_predi \\nction_o\", \"\", \"Prediction \\nfrom bht\", \"FRONT \\nEND\", \"ariane_pkg::bht_prediction_t[CVA6Cfg.IN \\nSTR_PER_FETCH-1:0]\"]]",
+    "metadata": {
+      "page": 2,
+      "rows": 5,
+      "cols": 5,
+      "accuracy": 100.0,
+      "bbox": [
+        71.52,
+        312.38533777643136,
+        542.4,
+        720.7415934565283
+      ]
+    },
+    "children": [],
+    "table_id": "c17df100-e621-4c65-aba7-89edb6b316d6",
+    "file_path": "/home/graham/workspace/experiments/pdf_extractor/src/mcp_doc_retriever/context7/pdf_extractor/input/BHT_CV32A65X.pdf",
+    "repo_link": "https://github.com/example/repo",
+    "section_path": [
+      "1. Document"
+    ]
+  },
+  {
+    "type": "text",
+    "content": "Content extracted from BHT_CV32A65X.pdf",
+    "file_path": "/home/graham/workspace/experiments/pdf_extractor/src/mcp_doc_retriever/context7/pdf_extractor/input/BHT_CV32A65X.pdf",
+    "repo_link": "https://github.com/example/repo",
+    "section_path": [
+      "1. Document"
+    ],
+    "metadata": {
+      "page": 1,
+      "source": "pdf_to_json_converter"
+    }
+  }
+]

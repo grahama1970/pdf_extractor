@@ -1,0 +1,14 @@
+{
+  "tables": [
+    {
+      "page": 1,
+      "bbox": [70, 100, 540, 180],
+      "description": "Signal description table"
+    },
+    {
+      "page": 2,
+      "bbox": [70, 310, 540, 720],
+      "description": "BHT signals table"
+    }
+  ]
+}

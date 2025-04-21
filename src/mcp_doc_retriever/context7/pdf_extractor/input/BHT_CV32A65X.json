@@ -1,0 +1,14 @@
+{
+  "tables": [
+    {
+      "page": 1,
+      "bbox": [50, 50, 500, 200],
+      "description": "Test table 1"
+    },
+    {
+      "page": 2,
+      "bbox": [100, 100, 400, 300],
+      "description": "Test table 2"
+    }
+  ]
+}
