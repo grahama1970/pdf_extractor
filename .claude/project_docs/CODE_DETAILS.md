@@ -47,3 +47,50 @@ else:
    - Test with simpler PDFs
    - Analyze extraction patterns
    - Implement robust fallbacks
+
+## Async Recursive Workflows Debugging
+When building or debugging async recursive workflows:
+- Add deep contextual logging
+- Propagate error messages explicitly
+- Never rely solely on inner function error handling
+- Refactor orchestration layer if needed
+- Ensure failures are observable, diagnosable, fixable
+
+## Lesson Logging Management
+- Add concise lesson entries to ArangoDB for novel techniques/patterns
+- Use CLI script: `src/mcp_doc_retriever/lessons_cli.py add`
+- Required fields: role, problem, solution, tags
+- Environment variables: ARANGO_HOST, ARANGO_USER, ARANGO_PASSWORD, ARANGO_DB
+- Lesson updates must be done directly in ArangoDB; CLI updates not supported
+
+## Package Management
+- Using the right packages is more important than writing clever code
+- Follow 95/5 rule: 95% package functionality, 5% customization
+- Follow code reuse enforcement policy:
+  - Required sources: python: ["pypi", "internal-utils>=2.3"]
+  - Check order: organization_registry → public_registry → approved_vendors
+  - Security requirements: vulnerability scanning with max CVE age of 30 days
+
+## Dependency Requirements
+- Include version constraints (e.g., Pandas==2.1.3)
+- Validate licenses using `license_checker` tool
+- For custom code (>50 lines):
+  - Create `reuse_exception.md` with cost-benefit analysis
+  - Obtain Architect approval
+
+## Static Analysis Priorities
+- Prioritize creating functional code before addressing Pylance errors
+- Verify code produces expected results before focusing on type annotations
+- Do not obsess over static analysis warnings if code functions correctly
+- Address runtime issues before improving static type checking
+
+## Package Research Requirements
+- **CRITICAL**: Always use perplexity to research packages before adding them
+- Do NOT rely on model training data which may be outdated
+- Research queries should include:
+  - "Latest version of [package_name]"
+  - "[package_name] vs alternatives for [specific task]"
+  - "[package_name] known issues 2025"
+  - "[package_name] integration with [other project components]"
+- Document your package selection reasoning based on current research
+- Include links to current documentation in code comments

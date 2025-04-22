@@ -1,0 +1,100 @@
+<View>
+  <!-- Header with PDF and task information -->
+  <Header value="PDF Table Validation Interface" />
+  <View style="display: flex; gap: 8px; margin-bottom: 8px;">
+    <Text name="pdf_id" value="PDF: $pdf_id" />
+    <Text name="page_num" value="Page: $page" />
+  </View>
+  
+  <!-- Main content area with PDF viewer and tools -->
+  <View style="display: flex; gap: 1em">
+    <!-- Left side: PDF viewer with annotation tools -->
+    <View style="flex: 1; padding: 1em; background: #f8f9fa; border-radius: 4px; min-height: 700px;">
+      <!-- PDF page image with zoom and rotation controls -->
+      <Image name="pdf_page" value="$pdf_page_url" zoom="true" zoomControl="true" rotateControl="true" width="100%" maxHeight="700px" />
+      
+      <!-- Bounding box labeling for tables -->
+      <RectangleLabels name="table_bbox_label" toName="pdf_page">
+        <Label value="Table" background="blue" />
+        <Label value="Table Header" background="green" />
+        <Label value="Table Footer" background="purple" />
+        <Label value="Complex Table" background="red" />
+      </RectangleLabels>
+    </View>
+    
+    <!-- Right side: Table data and validation controls -->
+    <View style="flex: 1; padding: 1em; background: #f8f9fa; border-radius: 4px; overflow: auto; max-height: 700px;">
+      <!-- Table extraction information -->
+      <Header value="Extracted Table Information" />
+      <View style="margin-bottom: 1em; padding: 0.5em; background: #e9ecef; border-radius: 4px;">
+        <Text name="table_info" value="ID: $table_id | Source: $source" />
+      </View>
+      
+      <!-- Interactive table data editor -->
+      <Header value="Table Data" />
+      <View style="max-height: 300px; overflow: auto; margin-bottom: 1em;">
+        <Table name="table_data" value="$table_data" editable="true" />
+      </View>
+      
+      <!-- Validation controls section -->
+      <Header value="Validation Controls" />
+      <Choices name="validation_status" toName="pdf_page" choice="single" required="true" showInline="true">
+        <Choice value="Approve" hint="Table is correct as extracted" />
+        <Choice value="Edit" hint="Table data or bbox was modified" />
+        <Choice value="Reject" hint="This is not a valid table/ignore it" />
+        <Choice value="Add Table" hint="Manually added this table" />
+        <Choice value="Merge" hint="Merge this table with another (specify target below)" />
+      </Choices>
+      
+      <!-- Merge instructions - only shown when Merge is selected -->
+      <TextArea 
+        name="merge_instruction" 
+        toName="pdf_page"
+        placeholder="If 'Merge' selected, enter TARGET table ID here (e.g., camelot_p3_t1)"
+        rows="1" 
+        editable="true"
+        visibleWhen="choice-selected" 
+        whenTagName="validation_status" 
+        whenChoiceValue="Merge"
+      />
+      
+      <!-- Extraction quality rating -->
+      <Header value="Extraction Quality Rating" />
+      <Rating name="extraction_quality" toName="pdf_page" maxRating="5" icon="star" tooltip="Rate the quality of the automatic extraction" />
+      
+      <!-- Comments section -->
+      <Header value="Reviewer Comments" />
+      <TextArea 
+        name="comment" 
+        toName="pdf_page" 
+        placeholder="Add any comments about this table extraction..." 
+        rows="3" 
+        editable="true" 
+        maxLength="500"
+      />
+      
+      <!-- Advanced controls section (collapsed by default) -->
+      <Collapse title="Advanced Options">
+        <!-- Table type classification -->
+        <Choices name="table_type" toName="pdf_page" choice="single" showInline="true">
+          <Choice value="Simple" />
+          <Choice value="Complex" />
+          <Choice value="Nested" />
+          <Choice value="Spanning Cells" />
+          <Choice value="Multi-Page" />
+        </Choices>
+        
+        <!-- Re-extraction parameters -->
+        <Header value="Re-extraction Parameters" />
+        <Choices name="extraction_method" toName="pdf_page" choice="single" showInline="true">
+          <Choice value="camelot_lattice" />
+          <Choice value="camelot_stream" />
+          <Choice value="marker" />
+          <Choice value="qwen" />
+        </Choices>
+        
+        <Number name="confidence_threshold" toName="pdf_page" min="0.1" max="1.0" step="0.1" defaultValue="0.7" />
+      </Collapse>
+    </View>
+  </View>
+</View>

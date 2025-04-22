@@ -57,6 +57,7 @@ dependencies = [
     "torch>=2.2.2", # For CUDA 12.8 compatibility
     "torchvision>=0.17.2", # Matching version for torch 2.2.2
     "torchaudio>=2.2.2", # Matching version for torch 2.2.2
+    "llm>=0.24.2",
 ]
 
 [project.optional-dependencies]

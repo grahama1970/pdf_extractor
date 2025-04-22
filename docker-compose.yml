@@ -1,20 +1,8 @@
 version: '3.8'
 
 services:
-  labelstudio:
-    image: heartexlabs/label-studio:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./label-studio-data:/label-studio/data
-      - ./corrections:/app/corrections
-    environment:
-      - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
-      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/app/corrections
-    networks:
-      - pdf-extraction-network
-
-  flask-api:
+  # PDF Extractor application service
+  pdf_extractor:
     build:
       context: .
       dockerfile: Dockerfile
@@ -24,18 +12,110 @@ services:
       - ./uploads:/app/uploads
       - ./output:/app/output
       - ./corrections:/app/corrections
+      - ./extracted_data:/app/extracted_data
+    depends_on:
+      redis:
+        condition: service_healthy
+      arangodb:
+        condition: service_healthy
+      labelstudio:
+        condition: service_started
     environment:
       - OUTPUT_DIR=/app/output
       - CORRECTIONS_DIR=/app/corrections
+      - REDIS_URL=redis:6379
+      - ARANGO_HOST=arangodb
+      - ARANGO_PORT=8529
+      - ARANGO_DB=${ARANGO_DB}
+      - ARANGO_USERNAME=${ARANGO_USERNAME}
+      - ARANGO_PASSWORD=${ARANGO_PASSWORD}
+      - LABEL_STUDIO_URL=http://labelstudio:8080
+    restart: unless-stopped
     networks:
       - pdf-extraction-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
+  # Label Studio for annotation
+  labelstudio:
+    image: heartexlabs/label-studio:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - label-studio-data:/label-studio/data
+      - ./corrections:/label-studio/files/corrections
+    environment:
+      - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/label-studio/files
+      - LABEL_STUDIO_USERNAME=${LABEL_STUDIO_USERNAME}
+      - LABEL_STUDIO_PASSWORD=${LABEL_STUDIO_PASSWORD}
+    restart: unless-stopped
+    networks:
+      - pdf-extraction-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis service for caching (without password for litellm compatibility)
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --save 20 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - pdf-extraction-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ArangoDB service for document storage
+  arangodb:
+    image: arangodb/arangodb:latest
+    restart: unless-stopped
+    ports:
+      - "8529:8529"
+    environment:
+      - ARANGO_ROOT_PASSWORD=${ARANGO_ROOT_PASSWORD}
+      - ARANGODB_USERNAME=${ARANGO_USERNAME}
+      - ARANGODB_PASSWORD=${ARANGO_PASSWORD}
+      - ARANGODB_DBNAME=${ARANGO_DB}
+    volumes:
+      - arango_data:/var/lib/arangodb3
+      - arango_apps:/var/lib/arangodb3-apps
+      - ./schemas:/schemas
+    networks:
+      - pdf-extraction-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8529/_api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+# Volumes for data persistence
 volumes:
   label-studio-data:
+  redis_data:
+  arango_data:
+  arango_apps:
   uploads:
   output:
   corrections:
+  extracted_data:
 
+# Network for service communication
 networks:
   pdf-extraction-network:
     driver: bridge

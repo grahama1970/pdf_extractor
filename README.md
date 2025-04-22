@@ -1,4 +1,3 @@
-```markdown
 # PDF Extraction Service 📄🔍🤝
 
 ## Overview 🌟
@@ -8,6 +7,33 @@ The `pdf-extraction-service` is a Dockerized application designed to extract str
 The service uses a **FastAPI server** (`api.py`) for Dockerized deployment, supporting asynchronous PDF processing and real-time updates via Server-Sent Events (SSE) for compatibility with Multi-Cloud Platform (MCP) architectures. A **Typer CLI** (`cli.py`) provides a local deployment option, mirroring the API's core conversion functionality. The core extraction logic is handled by `pdf_converter.py`, which integrates Camelot, Marker, and Qwen-VL-2B for robust PDF processing.
 
 This project is built to handle complex PDF layouts, including scanned documents and multi-page tables, and is designed for agentic workflows where AI-driven extraction can be refined by human expertise.
+
+## Complete Extraction Pipeline
+
+The pdf_extractor implements a structured pipeline:
+
+1. **PDF Loading**: Read PDF document into memory
+2. **Content Extraction**: Extract using a layered approach:
+   - Marker-based extraction for primary content
+   - Camelot for table detection
+   - Qwen VL-2B for complex visual elements
+3. **Conversion to Markdown**: Structure content in markdown format
+4. **JSON Conversion**: Convert to ordered JSON objects
+5. **Section Hierarchy Management**: Maintain document structure
+6. **ArangoDB Storage**: Insert JSON objects into ArangoDB
+7. **Query Interface**: Enable filtered content queries from ArangoDB
+
+## Processing Characteristics
+
+- **Computational Requirements**: Processing is resource-intensive
+  - Expected runtime: Minutes per document
+  - System requirements: 256GB RAM, 24GB GPU
+  - Optimization for speed is not required given hardware
+
+- **Error Handling Strategy**:
+  - Log errors but continue processing
+  - Skip elements that can't be processed
+  - Robustness is prioritized over completeness
 
 ## ✨ Features
 
@@ -23,6 +49,7 @@ This project is built to handle complex PDF layouts, including scanned documents
 - ✅ **Modular Architecture**: Separates extraction logic (`pdf_converter.py`), API (`api.py`), CLI (`cli.py`), and annotation (Label Studio) for maintainability.
 - ✅ **Logging and Monitoring**: Uses `loguru` for detailed logging of extraction and API events.
 - ✅ **Scalability**: Optimized for high-confidence extractions, with batch processing support.
+- ✅ **ArangoDB Integration**: Stores extracted JSON documents with support for semantic, BM25, keyword, and hybrid queries.
 
 ## 🏗️ Runtime Architecture Diagram
 
@@ -54,6 +81,7 @@ graph TD
             Converter -- "Camelot Extraction" --> CamelotLib("📊 Camelot")
             Converter -- "Marker Extraction" --> MarkerLib("📝 Marker")
             Converter -- "Qwen-VL-2B OCR" --> QwenLib("🤖 Qwen-VL-2B")
+            Converter -- "Store Documents" --> ArangoDB("🗄️ ArangoDB")
         end
 
         subgraph "Local Deployment"
@@ -79,6 +107,7 @@ graph TD
 - **Markdown Extraction**: Marker (structured content)
 - **OCR and Scanned PDFs**: Qwen-VL-2B (via Transformers)
 - **Annotation Platform**: Label Studio (optional HITL validation)
+- **Database**: ArangoDB (document storage and querying)
 - **PDF Processing**: `pdf2image`, `PyMuPDF` (fitz)
 - **Text Normalization**: `cleantext`
 - **Fuzzy Matching**: `fuzzywuzzy` (table merging)
@@ -163,6 +192,8 @@ LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/app/corrections
 - Docker & Docker Compose ([Install Docker](https://docs.docker.com/get-docker/))
 - Git (for cloning the repository)
 - Python 3.10+ (for local CLI usage)
+- ArangoDB (for document storage)
+- 256GB RAM and 24GB GPU (for optimal performance)
 
 ### Steps
 1. **Clone the Repository**:
@@ -291,6 +322,8 @@ Interact with the FastAPI server via HTTP endpoints:
 - **SSE Streaming**: Server-Sent Events stream conversion progress, supporting real-time updates in MCP architectures.
 - **Corrections JSON**: File (`corrections/<pdf_id>_corrections.json`) for storing human validations (requires additional endpoints).
 - **Label Studio Tasks**: JSON files (`corrections/<pdf_id>_tasks.json`) for human review (requires additional endpoints).
+- **Section Hierarchy**: Maintains parent-child relationships between document sections for structured output.
+- **ArangoDB Integration**: Stores and enables semantic, BM25, keyword, and hybrid queries of extracted content.
 
 ## 🧪 Testing
 
@@ -333,4 +366,3 @@ Interact with the FastAPI server via HTTP endpoints:
 - Develop a frontend for easier PDF uploads and management.
 - Support additional extraction methods (e.g., advanced OCR models).
 - Add authentication to FastAPI for secure access.
-```

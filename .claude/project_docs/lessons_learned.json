@@ -1,0 +1,48 @@
+{
+  "_key": "pdf_extractor_improved_table_merger",
+  "_id": "lessons_learned/pdf_extractor_improved_table_merger",
+  "project": "pdf_extractor",
+  "module": "improved_table_merger",
+  "created_date": "2025-04-22",
+  "author": "Claude",
+  "tags": ["table_extraction", "pdf_processing", "project_organization", "context_management"],
+  "problem": "Implementing an improved table merger while managing project organization and context limits",
+  "solution": "Created a modular implementation with configurable strategies and proper directory structure",
+  "lessons": [
+    {
+      "category": "Project Organization",
+      "title": "Directory Structure",
+      "description": "Organize code into proper module structure from the beginning",
+      "details": "Use src/module_name/ for core code, tests in test/, docs/ for documentation",
+      "benefit": "Improved maintainability and cleaner imports"
+    },
+    {
+      "category": "Context Management",
+      "title": "LLM Context Optimization",
+      "description": "Keep project documents concise and focused",
+      "details": "Create optimized summaries with only essential information",
+      "benefit": "Prevents context exhaustion and keeps focus on implementation"
+    },
+    {
+      "category": "Implementation",
+      "title": "95/5 Rule",
+      "description": "95% package functionality with 5% custom code",
+      "details": "Build on existing functionality rather than creating from scratch",
+      "benefit": "Faster development, more reliable code"
+    },
+    {
+      "category": "Shell Commands",
+      "title": "Command Simplicity",
+      "description": "Use simple shell commands with minimal quoting",
+      "details": "Test each step individually and avoid complex pipes",
+      "benefit": "More reliable automation scripts"
+    },
+    {
+      "category": "Testing",
+      "title": "Incremental Approach",
+      "description": "Test with simplified examples before full integration",
+      "details": "Verify basic functionality with synthetic data first",
+      "benefit": "Faster development cycles, easier debugging"
+    }
+  ]
+}

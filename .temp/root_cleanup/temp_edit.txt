@@ -1,0 +1,50 @@
+1. Add import for improved table merger after the camelot import:
+
+# Import camelot
+try:
+    import camelot.io as camelot
+    CAMELOT_AVAILABLE = True
+except ImportError:
+    logger.warning('camelot-py not found. Table extraction will not be available.')
+    camelot = None
+    CAMELOT_AVAILABLE = False
+
+# Import our improved table merger
+try:
+    from improved_table_merger import process_and_merge_tables
+    IMPROVED_MERGER_AVAILABLE = True
+except ImportError:
+    logger.warning('improved_table_merger not found. Using basic table processing.')
+    IMPROVED_MERGER_AVAILABLE = False
+
+2. Modify the extract_tables function to add multi-page table merging after processing individual tables:
+
+        # Process results, attempt stream fallback if needed
+        for table in tables:
+            table_data = _process_table(table)
+            if table_data['accuracy'] < 80 and flavor == 'lattice':
+                # Try stream mode fallback for low confidence tables
+                logger.info(f'Trying stream fallback for low confidence table on page {table.page}')
+                stream_tables = camelot.read_pdf(
+                    str(pdf_path),
+                    pages=str(table.page),
+                    flavor='stream',
+                    edge_tol=CAMELOT_STREAM_EDGE_TOL,
+                )
+                if len(stream_tables) > 0:
+                    stream_data = _process_table(stream_tables[0])
+                    if stream_data['accuracy'] > table_data['accuracy']:
+                        logger.info(f'Stream extraction better: {stream_data['accuracy']} > {table_data['accuracy']}')
+                        table_data = stream_data
+            
+            results.append(table_data)
+        
+        # Apply multi-page table merging if available
+        if len(results) > 1 and IMPROVED_MERGER_AVAILABLE:
+            logger.info('Applying multi-page table merging')
+            original_count = len(results)
+            results = process_and_merge_tables(tables)
+            merged_count = len(results)
+            
+            if merged_count < original_count:
+                logger.info(f'Merged {original_count - merged_count} multi-page tables')

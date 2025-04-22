@@ -1,0 +1,157 @@
+from typing import List, Dict, Any, Optional, Tuple, Set
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+class TableExtractor:
+    """Enhanced table extraction from PDF documents.
+    
+    This class provides functionality to extract tables from PDFs and 
+    handles special cases like multi-page tables and merged cells.
+    """
+    
+    def __init__(self, 
+                 multi_page_detection: bool = True,
+                 similarity_threshold: float = 0.7):
+        """Initialize the table extractor.
+        
+        Args:
+            multi_page_detection: Flag to enable multi-page table detection
+            similarity_threshold: Threshold for table similarity detection
+        """
+        self.multi_page_detection = multi_page_detection
+        self.similarity_threshold = similarity_threshold
+        self.page_tables_map = {}  # Maps page numbers to tables on each page
+        self.multi_page_tables = []  # List of detected multi-page tables
+        
+    def extract_tables(self, pdf_path: str, all_pages: bool = True) -> Dict[str, List[Dict[str, Any]]]:
+        """Extract tables from a PDF file.
+        
+        Args:
+            pdf_path: Path to the PDF file
+            all_pages: Flag to extract from all pages (needed for multi-page detection)
+            
+        Returns:
+            Dictionary with tables and multi-page tables
+        """
+        try:
+            # Import marker here to avoid making it a required dependency
+            import marker
+        except ImportError:
+            raise ImportError("The marker package is required for TableExtractor. Install with: uv install marker")
+            
+        # Extract tables with Marker
+        extraction_result = marker.extract(pdf_path, all_pages=all_pages)
+        
+        # Process tables from extraction result
+        tables = extraction_result.get('tables', [])
+        
+        # Process tables with multi-page detection if enabled
+        if self.multi_page_detection and all_pages:
+            self._process_tables(tables)
+            
+            # Add multi-page tables to the result
+            return {
+                'tables': tables,
+                'multi_page_tables': self.multi_page_tables
+            }
+        
+        return {'tables': tables}
+    
+    def _process_tables(self, tables: List[Dict[str, Any]]) -> None:
+        """Process tables and detect multi-page tables.
+        
+        Args:
+            tables: List of tables from extraction
+            
+        Returns:
+            None
+        """
+        # Group tables by page
+        self.page_tables_map = {}
+        for table in tables:
+            page = table.get('page', 0)
+            if page not in self.page_tables_map:
+                self.page_tables_map[page] = []
+            self.page_tables_map[page].append(table)
+        
+        # Detect multi-page tables
+        self._detect_multi_page_tables()
+        
+        # Update table metadata with multi-page information
+        self._update_table_metadata(tables)
+    
+    def _detect_multi_page_tables(self) -> None:
+        """Detect tables that span multiple pages.
+        
+        Returns:
+            None
+        """
+        # Get sorted list of pages
+        pages = sorted(self.page_tables_map.keys())
+        
+        # Process all pages
+        for i in range(len(pages) - 1):
+            current_page = pages[i]
+            next_page = pages[i + 1]
+            
+            # Skip non-consecutive pages
+            if next_page != current_page + 1:
+                continue
+                
+            current_tables = self.page_tables_map[current_page]
+            next_tables = self.page_tables_map[next_page]
+            
+            # Check for multi-page tables
+            self._find_multi_page_candidates(
+                current_tables, next_tables, current_page, next_page
+            )
+    
+    def _find_multi_page_candidates(self, 
+                                   tables1: List[Dict[str, Any]], 
+                                   tables2: List[Dict[str, Any]],
+                                   page1: int,
+                                   page2: int) -> None:
+        """Find candidate tables for multi-page continuation.
+        
+        Args:
+            tables1: Tables from the first page
+            tables2: Tables from the second page
+            page1: First page number
+            page2: Second page number
+            
+        Returns:
+            None
+        """
+        # Look for tables that might be continued
+        for idx1, table1 in enumerate(tables1):
+            # Check if table is at the bottom of the page
+            if self._is_table_at_bottom(table1):
+                for idx2, table2 in enumerate(tables2):
+                    # Check if table is at the top of the next page
+                    if self._is_table_at_top(table2):
+                        # Calculate similarity between tables
+                        similarity = self._calculate_table_similarity(table1, table2)
+                        
+                        if similarity >= self.similarity_threshold:
+                            logger.info(f"Multi-page table detected between pages {page1} and {page2}")
+                            
+                            # Create multi-page table
+                            multi_page_table = {
+                                'type': 'multi_page_table',
+                                'pages': [page1, page2],
+                                'parts': [table1, table2],
+                                'similarity': similarity
+                            }
+                            
+                            # Mark tables as parts of a multi-page table
+                            table1['is_multi_page'] = True
+                            table1['multi_page_id'] = len(self.multi_page_tables)
+                            table1['continues_on_page'] = page2
+                            
+                            table2['is_multi_page'] = True
+                            table2['multi_page_id'] = len(self.multi_page_tables)
+                            table2['continued_from_page'] = page1
+                            
+                            self.multi_page_tables.append(multi_page_table)

@@ -46,9 +46,13 @@ from mcp_doc_retriever.context7.pdf_extractor.table_extractor import extract_tab
 class TableMetadata(TypedDict, total=False):
     """Metadata for tables extracted from PDFs."""
     page: int
+    page_range: str
+    is_multi_page: bool
     rows: int
     cols: int
     accuracy: float
+    extraction: Dict[str, Any]
+    merge: Dict[str, Any]
     bbox: Union[Tuple[float, float, float, float], List[float]]
     source: str
 
@@ -75,7 +79,7 @@ def process_tables_from_markers(
         if "tables" not in marker_json:
             return {"status": "error", "content": "No table markers found", "metadata": {}}
             
-        raw_tables = extract_tables(pdf_path)
+        raw_tables = extract_tables(pdf_path, pages="all")
         if not raw_tables:
             return {"status": "error", "content": "No tables extracted", "metadata": {}}
             
@@ -155,6 +159,17 @@ def parse_markdown(
                     "accuracy": table.get("accuracy", 0.0),
                     "bbox": table.get("bbox", [0.0, 0.0, 0.0, 0.0])
                 }
+                # Add multi-page table metadata if present
+                if "page_range" in table:
+                    metadata["page_range"] = table["page_range"]
+                    metadata["is_multi_page"] = True
+
+                # Add extraction and merge metadata if present
+                if "metadata" in table:
+                    if "extraction" in table["metadata"]:
+                        metadata["extraction"] = table["metadata"]["extraction"]
+                    if "merge" in table["metadata"]:
+                        metadata["merge"] = table["metadata"]["merge"]
                 
                 nodes.append({
                     "type": "table",
@@ -212,6 +227,17 @@ def process_marker(
                 pdf_path,
                 repo_link
             )
+                    # Add multi-page table metadata if present
+                    if "page_range" in table:
+                        metadata["page_range"] = table["page_range"]
+                        metadata["is_multi_page"] = True
+
+                    # Add extraction and merge metadata if present
+                    if "metadata" in table:
+                        if "extraction" in table["metadata"]:
+                            metadata["extraction"] = table["metadata"]["extraction"]
+                        if "merge" in table["metadata"]:
+                            metadata["merge"] = table["metadata"]["merge"]
             
             if result["status"] == "success" and isinstance(result["content"], list):
                 nodes: DocumentList = []
