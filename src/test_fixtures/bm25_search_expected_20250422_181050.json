@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "doc": {
+        "problem": "Python error when processing JSON data",
+        "solution": "Use try/except blocks to handle JSON parsing exceptions",
+        "tags": [
+          "python",
+          "json",
+          "error-handling"
+        ],
+        "_key": "doc1_f5f1489c"
+      },
+      "bm25_score": 1.5127166509628296
+    },
+    {
+      "doc": {
+        "problem": "Python script runs out of memory with large datasets",
+        "solution": "Use chunking to process large data incrementally",
+        "tags": [
+          "python",
+          "memory",
+          "optimization"
+        ],
+        "_key": "doc3_f5f1489c"
+      },
+      "bm25_score": 0.41113632917404175
+    }
+  ],
+  "total": 2,
+  "offset": 0,
+  "limit": 3
+}

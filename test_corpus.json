@@ -1,0 +1,8 @@
+{
+  "title": "JSON Corpus",
+  "content": "This is the JSON corpus content.",
+  "items": [
+    {"id": 1, "value": "A"},
+    {"id": 2, "value": "B"}
+  ]
+}

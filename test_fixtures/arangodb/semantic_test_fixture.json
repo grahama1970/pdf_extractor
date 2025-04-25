@@ -1,0 +1,15 @@
+{
+  "params": {
+    "query_text": "python error handling best practices",
+    "similarity_threshold": 0.7,
+    "limit": 3,
+    "filter_tags": [
+      "python"
+    ]
+  },
+  "results": {
+    "results": [],
+    "total": 0,
+    "limit": 3
+  }
+}

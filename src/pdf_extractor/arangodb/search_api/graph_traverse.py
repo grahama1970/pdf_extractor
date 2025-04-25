@@ -1,0 +1,181 @@
+# src/pdf_extractor/arangodb/search_api/graph_traverse.py
+import sys
+import json
+from typing import Dict, Any, List, Optional, Union
+from loguru import logger
+from arango.database import StandardDatabase
+from pdf_extractor.arangodb.config import (
+    COLLECTION_NAME, GRAPH_NAME
+)
+from pdf_extractor.arangodb.arango_setup import connect_arango, ensure_database
+
+def graph_traverse(
+    db: StandardDatabase,
+    start_vertex_key: str,
+    min_depth: int = 1,
+    max_depth: int = 1,
+    direction: str = "ANY",
+    relationship_types: Optional[List[str]] = None,
+    vertex_filter: Optional[Dict[str, Any]] = None,
+    limit: int = 10
+) -> Dict[str, Any]:
+    """
+    Traverse the graph from a start vertex and return the connecting vertices.
+    
+    Args:
+        db: ArangoDB database
+        start_vertex_key: Key of the starting vertex
+        min_depth: Minimum traversal depth
+        max_depth: Maximum traversal depth
+        direction: Direction of traversal (OUTBOUND, INBOUND, ANY)
+        relationship_types: Optional list of relationship types to filter
+        vertex_filter: Optional filter for vertices 
+        limit: Maximum number of results to return
+        
+    Returns:
+        Dictionary with results and metadata
+    """
+    logger.info(f"Traversing graph from {start_vertex_key} (depth: {min_depth}..{max_depth}, direction: {direction})")
+    
+    # Validate parameters
+    if direction not in ["OUTBOUND", "INBOUND", "ANY"]:
+        logger.error(f"Invalid direction: {direction}")
+        return {"results": [], "count": 0, "error": f"Invalid direction: {direction}"}
+    
+    if min_depth < 0 or max_depth < min_depth:
+        logger.error(f"Invalid depth range: {min_depth}..{max_depth}")
+        return {"results": [], "count": 0, "error": f"Invalid depth range: {min_depth}..{max_depth}"}
+    
+    try:
+        # Construct AQL query
+        start_vertex = f"{COLLECTION_NAME}/{start_vertex_key}"
+        
+        # Build edge filter if relationship types are provided
+        edge_filter = ""
+        if relationship_types:
+            type_list = ", ".join([f"'{t}'" for t in relationship_types])
+            edge_filter = f"FILTER e.type IN [{type_list}]"
+        
+        # Build vertex filter if provided
+        vert_filter = ""
+        if vertex_filter:
+            conditions = []
+            for field, value in vertex_filter.items():
+                if isinstance(value, str):
+                    conditions.append(f"v.{field} == '{value}'")
+                else:
+                    conditions.append(f"v.{field} == {value}")
+            
+            if conditions:
+                vert_filter = f"FILTER {' AND '.join(conditions)}"
+        
+        aql = f"""
+        FOR v, e, p IN {min_depth}..{max_depth} {direction} @start_vertex GRAPH @graph_name
+        {edge_filter}
+        {vert_filter}
+        LIMIT @limit
+        RETURN {{
+            "vertex": v,
+            "edge": e,
+            "path": p
+        }}
+        """
+        
+        bind_vars = {
+            "start_vertex": start_vertex,
+            "graph_name": GRAPH_NAME,
+            "limit": limit
+        }
+        
+        cursor = db.aql.execute(aql, bind_vars=bind_vars)
+        results = list(cursor)
+        
+        logger.info(f"Traversal found {len(results)} results")
+        return {
+            "results": results,
+            "count": len(results),
+            "params": {
+                "start_vertex": start_vertex_key,
+                "min_depth": min_depth,
+                "max_depth": max_depth,
+                "direction": direction,
+                "relationship_types": relationship_types
+            }
+        }
+    except Exception as e:
+        logger.error(f"Traversal error: {e}")
+        return {"results": [], "count": 0, "error": str(e)}
+
+def validate_traversal(traversal_results: Dict[str, Any], fixture_path: str) -> bool:
+    """Validate traversal results against fixture."""
+    validation_failures = {}
+    try:
+        with open(fixture_path, "r") as f:
+            expected = json.load(f)
+        
+        # Validate structure
+        if "results" not in traversal_results:
+            validation_failures["results"] = {
+                "expected": "present",
+                "actual": "missing"
+            }
+            
+        if "count" not in traversal_results:
+            validation_failures["count"] = {
+                "expected": "present",
+                "actual": "missing"
+            }
+        
+        # Validate content
+        if "expected_count" in expected and traversal_results.get("count", 0) < expected["expected_count"]:
+            validation_failures["count"] = {
+                "expected": f">={expected['expected_count']}",
+                "actual": traversal_results.get("count", 0)
+            }
+        
+        return len(validation_failures) == 0, validation_failures
+    except Exception as e:
+        logger.error(f"Validation error: {e}")
+        return False, {"validation_error": str(e)}
+
+if __name__ == "__main__":
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
+    
+    # Initialize ArangoDB connection
+    client = connect_arango()
+    db = ensure_database(client)
+    
+    # Create test data
+    vertex_collection = db.collection(COLLECTION_NAME)
+    
+    # Check if we have at least one vertex, create if needed
+    if vertex_collection.count() == 0:
+        test_key = "test_root_vertex"
+        vertex_collection.insert({
+            "_key": test_key,
+            "content": "Root test vertex for traversal",
+            "tags": ["test", "traversal"]
+        })
+    else:
+        # Use the first document as starting point
+        first_doc = next(vertex_collection.all())
+        test_key = first_doc["_key"]
+    
+    # Run traversal
+    results = graph_traverse(db, test_key, min_depth=1, max_depth=2)
+    
+    # Validate results
+    validation_passed, validation_failures = validate_traversal(
+        results, "src/test_fixtures/traversal_expected.json"
+    )
+    
+    if validation_passed:
+        print("✅ Traversal validation passed")
+    else:
+        print("❌ VALIDATION FAILED - Traversal results don't match expected values")
+        print("FAILURE DETAILS:")
+        for field, details in validation_failures.items():
+            print(f"  - {field}: Expected: {details['expected']}, Got: {details['actual']}")
+        print(f"Total errors: {len(validation_failures)} fields mismatched")
+        sys.exit(1)

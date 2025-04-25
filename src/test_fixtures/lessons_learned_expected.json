@@ -1,0 +1,14 @@
+{
+  "test_lesson": {
+    "problem": "Table extraction failed for complex merged cells",
+    "solution": "Implemented custom cell detection algorithm",
+    "tags": ["table-extraction", "bug-fix", "merged-cells"],
+    "author": "Test Author"
+  },
+  "updated_lesson": {
+    "problem": "Table extraction failed for complex merged cells",
+    "solution": "Updated: Implemented improved cell detection algorithm with better boundary recognition",
+    "tags": ["table-extraction", "bug-fix", "merged-cells", "improved"],
+    "author": "Test Author"
+  }
+}

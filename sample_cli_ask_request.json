@@ -1,0 +1,23 @@
+{
+  "tasks": [
+    {
+      "task_id": "cli_test_Q0",
+      "question": "What is 2+2?",
+      "method": "concurrent",
+      "model": "gpt-4o-mini",
+      "validation_strategy": null
+    },
+    {
+      "task_id": "cli_test_Q1",
+      "question": "Extract the number from the previous answer.",
+      "method": "sequential",
+      "dependencies": ["cli_test_Q0"],
+      "model": "gpt-4o-mini",
+      "validation_strategy": "json",
+      "validation_options": {
+        "required_fields": ["extracted_number"]
+      }
+    }
+  ],
+  "max_concurrency": 2
+}

@@ -1,0 +1,379 @@
+# -*- coding: utf-8 -*-
+"""
+Description: Utility functions for interacting with ArangoDB, specifically for
+             managing and querying 'lessons_learned' data, including vector embeddings.
+
+Core Libraries/Concepts:
+------------------------
+- python-arango: Official Python driver for ArangoDB.
+  (https://python-driver-for-arangodb.readthedocs.io/en/latest/)
+- loguru: Logging library.
+- typing: For type hints.
+- embedding_utils: Assumed local module for creating text embeddings.
+
+Key Functions:
+--------------
+- connect_to_arango_client: Establishes connection and ensures DB exists.
+- get_lessons: Retrieves lessons based on filters.
+- upsert_lesson: Inserts or updates a lesson, including its embedding.
+- update_lesson: Updates specific fields of a lesson, regenerating embedding if text changes.
+- delete_lesson: Removes a lesson by its composite key.
+- query_lessons_by_keyword: Performs keyword search using AQL LIKE.
+- query_lessons_by_concept: Alias for keyword search (placeholder for future NLP).
+- query_lessons_by_similarity: Performs vector similarity search using embeddings and COSINE_SIMILARITY.
+
+Sample I/O (Conceptual - query_lessons_by_similarity):
+------------------------------------------------------
+Input:
+  db: ArangoDB database object
+  query_text: "How to handle API rate limits?"
+  top_n: 3
+Output:
+  [
+    {'document': {<lesson_doc_1>}, 'similarity_score': 0.95},
+    {'document': {<lesson_doc_2>}, 'similarity_score': 0.92},
+    {'document': {<lesson_doc_3>}, 'similarity_score': 0.88}
+  ]
+"""
+
+from arango import ArangoClient
+from arango.database import StandardDatabase
+from arango.cursor import Cursor
+from loguru import logger
+from typing import List, Dict, Any, Optional
+
+# Assuming embedding_utils is structured correctly for relative import
+# If it's in mcp_litellm/utils/, the import might need adjustment based on execution context
+# Use absolute import
+# Import the synchronous get_embedding from the correct location
+# Import from the local embedding_utils module
+# Import the module itself and the specific functions needed
+from pdf_extractor.llm_integration.utils import embedding_utils
+from pdf_extractor.llm_integration.utils.embedding_utils import get_embedding, get_text_for_embedding
+
+
+
+def connect_to_arango_client(config):
+    """Connect to the ArangoDB client, create database if it does not exist."""
+    client = ArangoClient(hosts=config['host'])
+    db_name = config['database_name']
+    username = config['username']
+    password = config['password']
+
+    # Connect to the _system database to manage databases
+    sys_db = client.db('_system', username=username, password=password)
+
+    # Check if target database exists
+    if not sys_db.has_database(db_name):
+        logger.info(f"Database '{db_name}' does not exist. Creating it.")
+        sys_db.create_database(db_name)
+    else:
+        logger.info(f"Database '{db_name}' already exists.")
+
+    # Connect to the target database
+    return client.db(db_name, username=username, password=password, verify=True)
+
+# Note: insert_object and handle_relationships seem related to STIX, not lessons_learned.
+# Adding basic type hints but consider if they belong in this module.
+def insert_object(db: StandardDatabase, obj: Dict[str, Any]) -> None:
+    """Insert a single STIX object into the database."""
+    collection_name = obj.get('type')
+    if not collection_name:
+        logger.error(f"Object missing 'type' field: {obj.get('id', 'N/A')}")
+        return
+    if not db.has_collection(collection_name):
+        logger.warning(f"Collection '{collection_name}' not found. Creating.")
+        db.create_collection(collection_name)
+
+    collection = db.collection(collection_name)
+    obj['_key'] = obj['id']
+    collection.insert(obj, overwrite=True)
+
+def handle_relationships(db: StandardDatabase, stix_objects: List[Dict[str, Any]]) -> None:
+    """Process and create edge relationships for STIX objects."""
+    skipped_relationships: List[str] = []
+    if not db.has_collection('relationships'):
+        db.create_collection('relationships', edge=True)
+    edge_collection = db.collection('relationships')
+    for obj in stix_objects:
+        if obj.get('type') == 'relationship':
+            (source_id, target_id) = (obj.get('source_ref'), obj.get('target_ref'))
+            if not source_id or not target_id:
+                skipped_relationships.append(obj['id'])
+                continue
+            edge_document = {'_from': f"{source_id.split('--')[0]}/{source_id}", '_to': f"{target_id.split('--')[0]}/{target_id}", '_key': obj['id'], 'relationship_type': obj.get('relationship_type', 'unknown')}
+            edge_collection.insert(edge_document, overwrite=True)
+    if skipped_relationships:
+        logger.warning(f'Skipped relationships: {skipped_relationships}')
+
+
+def get_lessons(db: StandardDatabase, role: Optional[str] = None, category: Optional[str] = None, identifier: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Query lessons from the 'lessons_learned' collection with optional filters.
+    Returns a list of lesson documents.
+    """
+    filters: List[str] = []
+    bind_vars: Dict[str, Any] = {}
+
+    if role:
+        filters.append("lesson.role == @role")
+        bind_vars["role"] = role
+    if category:
+        filters.append("lesson.category == @category")
+        bind_vars["category"] = category
+    if identifier:
+        filters.append("lesson.identifier == @identifier")
+        bind_vars["identifier"] = identifier
+
+    filter_clause = ""
+    if filters:
+        filter_clause = "FILTER " + " AND ".join(filters)
+
+    query = f"""
+    FOR lesson IN lessons_learned
+        {filter_clause}
+        RETURN lesson
+    """
+
+    cursor = db.aql.execute(query, bind_vars=bind_vars)
+    return [doc for doc in cursor]
+
+
+def upsert_lesson(db: StandardDatabase, lesson: Dict[str, Any]) -> None:
+    """
+    Upsert a lesson into the 'lessons_learned' collection.
+    Creates or replaces the lesson based on composite key.
+    Also generates and stores a vector embedding for the lesson text.
+    """
+    collection = db.collection("lessons_learned")
+    key = f"{lesson.get('role','')}_{lesson.get('category','')}_{lesson.get('identifier','')}".replace(" ", "_")
+    lesson['_key'] = key
+
+    # Generate and add embedding
+    lesson_text = lesson.get('lesson')
+    if lesson_text:
+        try:
+            # Use the synchronous version if running in sync context, or manage async appropriately
+            # Use the synchronous get_embedding function
+            embedding_vector = get_embedding(lesson_text)
+            lesson['lesson_embedding'] = embedding_vector
+            # Optionally store embedding metadata too
+            # lesson['embedding_metadata'] = embedding_data.get('metadata')
+            logger.info(f"Generated embedding for lesson: {key}")
+        except Exception as e:
+            logger.error(f"Failed to generate embedding for lesson {key}: {e}")
+            lesson['lesson_embedding'] = None # Ensure field exists even if generation fails
+
+    try:
+        collection.insert(lesson, overwrite=True)
+        logger.info(f"Upserted lesson: {key}")
+    except Exception as e:
+        logger.warning(f"Upsert failed for lesson {key}: {e}")
+
+def update_lesson(db: StandardDatabase, lesson: Dict[str, Any]) -> None:
+    """
+    Update an existing lesson in the 'lessons_learned' collection.
+    Requires the same composite key logic as upsert.
+    Updates the embedding if the lesson text changes.
+    """
+    collection = db.collection("lessons_learned")
+    key = f"{lesson.get('role','')}_{lesson.get('category','')}_{lesson.get('identifier','')}".replace(" ", "_")
+    lesson['_key'] = key
+
+    # Check if lesson text exists and potentially generate/update embedding
+    lesson_text = lesson.get('lesson')
+    update_payload = lesson.copy() # Work on a copy to avoid modifying input dict directly for embedding logic
+    should_update_embedding = False
+    if 'lesson' in update_payload: # Only update embedding if lesson text is part of the update
+        should_update_embedding = True
+        if not lesson_text: # Handle case where lesson text is explicitly set to empty/null
+             update_payload['lesson_embedding'] = None
+             logger.info(f"Removing embedding for updated lesson (empty text): {key}")
+
+
+    if should_update_embedding and lesson_text:
+        try:
+            # Use the synchronous get_embedding function
+            embedding_vector = get_embedding(lesson_text)
+            update_payload['lesson_embedding'] = embedding_vector
+            logger.info(f"Generated embedding for updated lesson: {key}")
+        except Exception as e:
+            logger.error(f"Failed to generate embedding for updated lesson {key}: {e}")
+            # Decide how to handle embedding update failure - keep old one? set to null?
+            # Let's set to null to indicate failure during update.
+            update_payload['lesson_embedding'] = None
+
+
+    try:
+        # Use update=True to only update specified fields
+        # Use keep_none=False to remove fields set to None (like failed embedding)
+        # Use merge_objects=True to merge sub-objects if any
+        # Pass the potentially modified update_payload
+        collection.update(update_payload, merge_objects=True, keep_none=False)
+        logger.info(f"Updated lesson: {key}")
+    except Exception as e:
+        logger.warning(f"Update failed for lesson {key}: {e}")
+
+
+
+def delete_lesson(db: StandardDatabase, role: str, category: str, identifier: str) -> None:
+    """
+    Delete a lesson from the 'lessons_learned' collection by composite key.
+    """
+    collection = db.collection("lessons_learned")
+    key = f"{role}_{category}_{identifier}".replace(" ", "_")
+
+    try:
+        collection.delete(key)
+    except Exception as e:
+        logger.warning(f"Delete failed: {e}")
+
+
+# --- New Agent Query Functions ---
+
+def query_lessons_by_keyword(db: StandardDatabase, keywords: List[str], limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Query lessons by keywords, searching in lesson text, category, and identifier.
+    Uses simple case-insensitive text matching (LIKE).
+
+    Args:
+        db: ArangoDB database connection object.
+        keywords: A list of keywords to search for.
+        limit: Maximum number of results to return.
+
+    Returns:
+        A list of matching lesson documents.
+    """
+    if not keywords:
+        return []
+
+    # Build filter conditions for each keyword across multiple fields
+    keyword_filters = []
+    bind_vars = {}
+    for i, keyword in enumerate(keywords):
+        # Basic sanitization: remove potential AQL injection characters?
+        # For LIKE, '%' and '_' are wildcards. Escape them if searching literally?
+        # Assuming keywords are simple words for now.
+        safe_keyword = str(keyword).replace('%', '\\%').replace('_', '\\_')
+        key_var = f"keyword{i}"
+        bind_vars[key_var] = f"%{safe_keyword}%" # Prepare for LIKE with wildcards around the keyword
+        keyword_filters.append(
+            f"""(
+                LIKE(LOWER(lesson.lesson), LOWER(@{key_var}), true) OR
+                LIKE(LOWER(lesson.category), LOWER(@{key_var}), true) OR
+                LIKE(LOWER(lesson.identifier), LOWER(@{key_var}), true)
+            )"""
+        ) # Using LIKE for case-insensitive partial match
+
+    # Combine keyword filters with OR (lesson matches any keyword)
+    filter_clause = "FILTER " + " OR ".join(keyword_filters)
+
+    query = f"""
+    FOR lesson IN lessons_learned
+        {filter_clause}
+        LIMIT @limit
+        RETURN lesson
+    """
+    bind_vars["limit"] = limit
+
+    try:
+        cursor: Cursor = db.aql.execute(query, bind_vars=bind_vars)
+        return [doc for doc in cursor]
+    except Exception as e:
+        logger.error(f"Keyword query failed: {e}")
+        return []
+
+def query_lessons_by_concept(db: StandardDatabase, concepts: List[str], limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Query lessons by concepts (currently implemented as keyword search).
+    Searches concept terms in lesson text, category, and identifier.
+
+    Args:
+        db: ArangoDB database connection object.
+        concepts: A list of concept terms to search for.
+        limit: Maximum number of results to return.
+
+    Returns:
+        A list of matching lesson documents.
+    """
+    # Currently, this is an alias for keyword search.
+    # Future enhancement: Use NLP techniques for true concept matching.
+    logger.info("Executing concept query (using keyword search implementation).")
+    return query_lessons_by_keyword(db, concepts, limit)
+
+
+def query_lessons_by_similarity(db: StandardDatabase, query_text: str, top_n: int = 5) -> List[Dict[str, Any]]:
+    """
+    Query lessons by semantic similarity to a given text.
+    Requires lessons to have 'lesson_embedding' field and assumes a vector index
+    (e.g., named 'idx_lesson_embedding' using cosine similarity) is configured on that field.
+
+    Args:
+        db: ArangoDB database connection object.
+        query_text: The text to find similar lessons for.
+        top_n: The number of most similar lessons to return.
+
+    Returns:
+        A list of the top N most similar lesson documents, ordered by similarity.
+        Returns empty list on failure or if prerequisites are not met.
+    """
+    try:
+        # 1. Generate embedding for the query text
+        # Use the synchronous get_embedding function
+        query_vector = get_embedding(query_text)
+        if not query_vector or not isinstance(query_vector, list):
+            logger.error(f"Failed to generate valid embedding for query text: {query_text}")
+            return []
+        # Check dimension against a constant defined in embedding_utils (assuming it exists)
+        expected_dim = getattr(embedding_utils, 'DEFAULT_EMBEDDING_DIM', None) # type: ignore
+        if expected_dim is not None and len(query_vector) != expected_dim:
+             logger.warning(f"Query vector dimension mismatch: expected {expected_dim}, got {len(query_vector)}")
+             # Consider returning [] or raising error if dimension mismatch is critical
+             # Proceeding anyway for now, but similarity might be meaningless
+
+        # 2. Execute AQL vector search query
+        # This query uses manual cosine similarity calculation.
+        # Replace with ArangoDB's native vector search functions if an index is available.
+        # Example using COSINE_SIMILARITY (requires ArangoDB 3.11+ and appropriate index):
+        # query = f"""
+        # LET queryVector = @query_vector
+        # FOR lesson IN lessons_learned
+        #     FILTER HAS(lesson, 'lesson_embedding') AND lesson.lesson_embedding != null
+        #     LET similarity = COSINE_SIMILARITY(lesson.lesson_embedding, queryVector)
+        #     FILTER similarity > 0 // Optional: Filter out dissimilar results
+        #     SORT similarity DESC
+        #     LIMIT @top_n
+        #     RETURN MERGE(lesson, {{ similarity_score: similarity }})
+        # """
+        # Using manual calculation as a fallback:
+        # Use AQL COSINE_SIMILARITY with vector index
+        query = """
+        FOR doc IN lessons_learned
+        LET similarity_score = COSINE_SIMILARITY(doc.lesson_embedding, @query_vector)
+        SORT similarity_score DESC
+        LIMIT @top_n
+        RETURN {
+          document: doc,
+          similarity_score: similarity_score
+        }
+        """
+
+        bind_vars = {
+            "query_vector": query_vector,
+            "top_n": top_n
+            # "expected_dim": expected_dim # Pass if needed by AQL, though COSINE_SIMILARITY usually doesn't require it
+        }
+
+        cursor: Cursor = db.aql.execute(query, bind_vars=bind_vars)
+        results: List[Dict[str, Any]] = [doc for doc in cursor]
+        logger.info(f"Found {len(results)} similar lessons for query '{query_text[:50]}...'.")
+        return results
+
+    except Exception as e:
+        # Log the specific AQL error if possible
+        aql_error_num = getattr(e, 'http_exception', {}).get('errorNum', None)
+        if aql_error_num:
+             logger.error(f"Similarity query failed with AQL error {aql_error_num}: {e}")
+        else:
+             logger.error(f"Similarity query failed: {e}")
+        return []

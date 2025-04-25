@@ -1,0 +1,16 @@
+{
+  "tasks": [
+    {
+      "task_id": "france_capital_match",
+      "question": "What is the capital of France? Respond with only the city name.",
+      "model": "openai/gpt-4o-mini",
+      "validation_strategy": "match_from_list", 
+      "validation_options": {
+        "corpus_source": "Paris, Washington DC, London", 
+        "corpus_type": "string", 
+        "delimiter": ",", 
+        "min_similarity": 85.0 
+      }
+    }
+  ]
+}

@@ -58,6 +58,14 @@ dependencies = [
     "torchvision>=0.17.2", # Matching version for torch 2.2.2
     "torchaudio>=2.2.2", # Matching version for torch 2.2.2
     "llm>=0.24.2",
+    "paramiko>=3.5.1",
+    "modelcontextprotocol>=0.1.0",
+    "mcp[cli]>=1.6.0",
+    "fastapi-mcp>=0.3.2",
+    "pytrie>=0.4.0",
+    "pymupdf>=1.25.5",
+    "html2text>=2025.4.15",
+    "reportlab>=4.4.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,88 @@
+{
+  "documents": [
+    {
+      "_key": "meta_20250422112654",
+      "type": "metadata",
+      "filename": "test_doc.pdf",
+      "page_count": 5,
+      "extraction_date": "2025-04-22T11:26:54.181763",
+      "file_path": "test_doc.pdf",
+      "source": "validation_test"
+    },
+    {
+      "_key": "h1_20250422112654",
+      "type": "heading",
+      "level": 1,
+      "text": "Introduction to ArangoDB",
+      "page": 1,
+      "token_count": 3,
+      "file_path": "test_doc.pdf",
+      "extraction_date": "2025-04-22T11:26:54.181769",
+      "source": "validation_test"
+    },
+    {
+      "_key": "p1_20250422112654",
+      "type": "paragraph",
+      "text": "ArangoDB is a multi-model database that supports key-value, document, and graph data models.",
+      "page": 1,
+      "token_count": 14,
+      "file_path": "test_doc.pdf",
+      "extraction_date": "2025-04-22T11:26:54.181770",
+      "source": "validation_test"
+    },
+    {
+      "_key": "h2_20250422112654",
+      "type": "heading",
+      "level": 2,
+      "text": "Query Types",
+      "page": 2,
+      "token_count": 2,
+      "file_path": "test_doc.pdf",
+      "extraction_date": "2025-04-22T11:26:54.181772",
+      "source": "validation_test"
+    },
+    {
+      "_key": "p2_20250422112654",
+      "type": "paragraph",
+      "text": "ArangoDB supports multiple query types including keyword, semantic, BM25, and hybrid search.",
+      "page": 2,
+      "token_count": 13,
+      "file_path": "test_doc.pdf",
+      "extraction_date": "2025-04-22T11:26:54.181773",
+      "source": "validation_test"
+    },
+    {
+      "_key": "t1_20250422112654",
+      "type": "table",
+      "caption": "Query Type Comparison",
+      "headers": [
+        "Type",
+        "Use Case",
+        "Performance"
+      ],
+      "rows": [
+        [
+          "Keyword",
+          "Exact matching",
+          "Fast"
+        ],
+        [
+          "Semantic",
+          "Meaning-based",
+          "Medium"
+        ],
+        [
+          "Hybrid",
+          "Combined approach",
+          "Variable"
+        ]
+      ],
+      "page": 3,
+      "token_count": 25,
+      "file_path": "test_doc.pdf",
+      "extraction_date": "2025-04-22T11:26:54.181776",
+      "source": "validation_test"
+    }
+  ],
+  "test_id": "20250422112654"
+}

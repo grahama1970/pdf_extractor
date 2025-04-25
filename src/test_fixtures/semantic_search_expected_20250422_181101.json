@@ -1,0 +1,46 @@
+{
+  "results": [
+    {
+      "doc": {
+        "_key": "doc3_50ad8171",
+        "problem": "Python script runs out of memory with large datasets",
+        "solution": "Use chunking to process large data incrementally",
+        "tags": [
+          "python",
+          "memory",
+          "optimization"
+        ]
+      },
+      "similarity_score": 0.7954797966058329
+    },
+    {
+      "doc": {
+        "_key": "doc1_50ad8171",
+        "problem": "Python error when processing JSON data",
+        "solution": "Use try/except blocks to handle JSON parsing exceptions",
+        "tags": [
+          "python",
+          "json",
+          "error-handling"
+        ]
+      },
+      "similarity_score": 0.7740617604356889
+    },
+    {
+      "doc": {
+        "_key": "doc2_50ad8171",
+        "problem": "Database connection timeout in production",
+        "solution": "Implement connection pooling and retry mechanism",
+        "tags": [
+          "database",
+          "timeout",
+          "production"
+        ]
+      },
+      "similarity_score": 0.7143924493534781
+    }
+  ],
+  "total": 3,
+  "offset": 0,
+  "limit": 3
+}

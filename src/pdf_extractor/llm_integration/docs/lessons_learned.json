@@ -1,0 +1,165 @@
+[
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "AttributeError",
+        "identifier": "engine.py:process_batch",
+        "lesson": "Incorrectly accessed `item.mode` instead of `item.method` from QuestionItem model for execution method check. Corrected to use `item.method`."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "AttributeError",
+        "identifier": "engine.py:process_batch",
+        "lesson": "Tried to access non-existent `item.messages`. Should always construct the `messages` list from `item.question`. Removed the check."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "AttributeError",
+        "identifier": "engine.py:process_batch",
+        "lesson": "Incorrectly tried to access `item.retry_*` attributes from QuestionItem. Removed these arguments from `retry_llm_call` invocation."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "ArgumentPassing",
+        "identifier": "retry_llm_call.py",
+        "lesson": "`retry_llm_call` received QuestionItem but treated it as Dict, passing it incorrectly to `litellm_call` and accessing non-existent keys. Corrected to accept QuestionItem, construct the required Dict config (including messages), and modify the local messages list."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "DataStructure",
+        "identifier": "retry_llm_call.py",
+        "lesson": "`litellm_call` expects nested {\"llm_config\": {...}}. Previous fix constructed a flat dict. Corrected `retry_llm_call` to build the nested `call_config` and updated retry logic to modify `call_config[\"llm_config\"][\"messages\"]`."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "Mocking",
+        "identifier": "engine.py:mock_litellm_call",
+        "lesson": "`mock_litellm_call` expected QuestionItem but received nested dict `call_config` after `retry_llm_call` fix. Updated mock to expect Dict and access nested parameters."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "Mocking",
+        "identifier": "engine.py:mock_retry_llm_call",
+        "lesson": "Example used `mock_retry_llm_call` passing QuestionItem to `mock_litellm_call`, but the mock was incorrectly modified to expect a nested dict. Reverted `mock_litellm_call` to expect QuestionItem for the example."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "Debugging",
+        "identifier": "engine.py:process_batch",
+        "lesson": "Task exceptions from `asyncio.gather` were logged only as strings (`str(exception)`), hiding the true error type. Modified logging to include `type(exception)` and `repr(exception)` for clarity."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "MCP",
+        "identifier": ".roo/mcp.json",
+        "lesson": "Roo may fail to list an MCP server if there are subtle syntax/structural issues in its JSON definition, even if the overall file is valid. Correcting the definition (e.g., using correct local Docker image name) allowed Roo to list the server."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "MCP",
+        "identifier": "MCP Server Implementation",
+        "lesson": "Defining a Docker container in `.roo/mcp.json` doesn't automatically make the service inside MCP-compatible. Roo reported 'No tools found' because the FastAPI service wasn't implementing the MCP protocol (discovery, tool announcement). A dedicated MCP server component is needed to wrap the FastAPI service."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "MCP",
+        "identifier": "fastapi-mcp Integration",
+        "lesson": "Using `fastapi-mcp` correctly exposes an SSE endpoint (`/mcp`) which responds correctly to `curl`. However, Roo still failed to list/connect to the server defined via the SSE URL in `.roo/mcp.json`, suggesting a potential issue within Roo's SSE client or configuration handling, rather than the service itself."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "MCP",
+        "identifier": "CORS Configuration",
+        "lesson": "Perplexity suggested checking CORS middleware for FastAPI when Roo fails to connect via SSE. Added `CORSMiddleware` to `main.py` allowing all origins. While this didn't resolve the server listing issue in Roo's UI, it's a standard check for web-based client interactions."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-06",
+        "category": "MCP",
+        "identifier": "Roo Connection Failure",
+        "lesson": "Despite verifying the FastAPI service (with `fastapi-mcp`) was running correctly and the `/mcp` SSE endpoint was responsive via `curl`, Roo consistently failed to list the server in the UI or connect via `use_mcp_tool` (Error: 'No connection found'). This indicates a likely issue within Roo's handling of project-level SSE MCP configurations, necessitating bypassing MCP for the demo."
+    },
+    {
+        "role": "Planner",
+        "date": "2025-04-07",
+        "category": "Planning",
+        "identifier": "Phase 5 Architecture Pivot (Task 5.4.2, 5.4.3)",
+        "lesson": "After significant architectural changes (like the engine redesign in Phase 5), the task plan must include explicit steps to re-verify the integration points and contracts between the changed components and the rest of the system (e.g., API models, documentation, client expectations). Failure to do so led to a divergence between the engine's dependency handling (requiring explicit `dependencies` list) and the documented API contract (expecting implicit `method`/`index`), breaking core functionality discovered only in later debugging."
+    },
+    {
+        "id": "lesson_boomerang_001",
+        "title": "Verify Test Execution Environment Early",
+        "context": "During orchestration of Task 8.3 (E2E Tests), significant time was spent troubleshooting 'RemoteDisconnected' errors when running tests against a containerized service. The root cause was executing tests from the host environment instead of within the service container, where dependencies and network configuration were correct.",
+        "lesson": "When orchestrating tasks involving containerized services and associated tests, prioritize verifying the test execution environment (container vs. host) early. Running tests in the wrong environment can lead to misleading connection or dependency errors, masking the true state of the service.",
+        "tags": [
+            "orchestration",
+            "testing",
+            "docker",
+            "debugging",
+            "environment",
+            "boomerang"
+        ],
+        "severity": "Medium",
+        "mitigation": "Explicitly instruct testing agents (e.g., Presenter) to execute tests within the appropriate container using 'docker exec' or similar methods. Check container dependencies include test-specific requirements.",
+        "timestamp": "2025-04-07T12:47:00Z",
+        "author": "Boomerang Orchestrator",
+        "version": "1.0"
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-07",
+        "category": "CredentialManagement",
+        "identifier": "config.yaml",
+        "lesson": "Environment variables must match exactly between .env, config.yaml, and code references. Case sensitivity and naming consistency prevents authorization failures."
+    },
+    {
+        "role": "Coder",
+        "date": "2025-04-07",
+        "category": "CredentialManagement",
+        "identifier": "db_client_init",
+        "lesson": "Database clients require explicit credential injection during initialization. Assume no automatic environment variable propagation between containers."
+    },
+    {
+        "role": "Librarian",
+        "date": "2025-04-07",
+        "category": "Security",
+        "identifier": "Task 9.2",
+        "lesson": "Security documentation update for Task 9.2: Vulnerabilities found include potential code injection via unsanitized input in parser.py. Implemented protections include strict input validation and sanitization routines in parser.py. Performance considerations were taken into account by optimizing pre-checks to reduce overhead. Known edge cases remain in complex object handling, large input validation, and recursive object sanitization. Future work includes creating tickets for these edge cases and developing additional test scenarios."
+    },
+    {
+        "role": "Senior Coder",
+        "date": "2025-04-07",
+        "category": "Security",
+        "identifier": "parser.py security hardening",
+        "lesson": "Implemented comprehensive security enhancements including: 1) Strengthened Unicode XSS protections with explicit FE64/FE65 validation, 2) Added explicit complex number rejection, 3) Enhanced attribute validation with length checks and private attribute blocking, 4) Updated documentation with OWASP ASVS references, 5) Added test cases for all new security measures."
+    },
+    {
+        "_key": "planner_lesson_1a2b3c4d",
+        "role": "Planner",
+        "timestamp": "2025-04-22T16:36:50Z",
+        "severity": "Medium",
+        "category": "Planning",
+        "identifier": "Initial Task Analysis (litellm)",
+        "problem": "Conflicting architectural guidance between task_dynamic.md (direct integration) and README.md (standalone MCP service) for the litellm module.",
+        "solution": "Explicitly asked the user for clarification via ask_followup_question before proceeding with task delegation. Confirmed the task_dynamic.md approach should be followed.",
+        "lesson": "When project documentation (e.g., task lists, READMEs) presents conflicting architectural directions, the Planner must proactively seek clarification from the user/supervisor *before* delegating implementation tasks to avoid wasted effort or incorrect implementation.",
+        "tags": [
+            "planning",
+            "documentation",
+            "architecture",
+            "clarification"
+        ],
+        "version": "1.0"
+    }
+]

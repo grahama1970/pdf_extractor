@@ -1,0 +1,9 @@
+# Basic configuration for llm_integration CLI testing
+
+database:
+  host: "http://localhost:8529" # Default ArangoDB host
+  database_name: "doc_retriever_test_cli" # Use a test DB name
+  username: "root" # Use provided username
+  password: "openSesame" # Use provided password directly
+
+# Add other configurations if needed by modules

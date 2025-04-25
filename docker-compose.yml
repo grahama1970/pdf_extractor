@@ -80,6 +80,20 @@ services:
       timeout: 5s
       retries: 3
 
+   # Perplexity Ask Service
+  perplexity_ask:
+    image: mcp/perplexity-ask:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"  # Change this if the container uses a different port
+    networks:
+      - pdf-extraction-network
+    # Uncomment and edit the following as needed:
+    # environment:
+    #   - SOME_ENV_VAR=value
+    # volumes:
+    #   - ./some-local-dir:/some-container-dir
+
   # ArangoDB service for document storage
   arangodb:
     image: arangodb/arangodb:latest
@@ -103,6 +117,7 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+    command: --experimental-vector-index
 
 # Volumes for data persistence
 volumes:

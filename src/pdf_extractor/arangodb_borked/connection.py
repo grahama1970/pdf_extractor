@@ -55,14 +55,27 @@ def create_collections(db, collections=None):
                 
                 # Create indexes for improved search performance
                 if collection_name == 'lessons_learned':
-                    # Index for tags
-                    collection.add_hash_index(['tags[*]'], unique=False)
-                    # Index for author
-                    collection.add_hash_index(['author'], unique=False)
-                    # Index for project and module
-                    collection.add_hash_index(['project', 'module'], unique=False)
-                    # Full-text index for problem and solution
-                    collection.add_fulltext_index(['problem', 'solution'], min_length=3)
+                    try:
+                        # Index for tags array
+                        if 'tags' in collection.indexes():
+                            logger.info('Tags index already exists')
+                        else:
+                            collection.add_hash_index(fields=['tags[*]'], unique=False)
+                            logger.info('Created tags index')
+                            
+                        # Index for author field
+                        if 'author' in collection.indexes():
+                            logger.info('Author index already exists')
+                        else:
+                            collection.add_hash_index(fields=['author'], unique=False)
+                            logger.info('Created author index')
+                            
+                        # Full-text index for problem and solution
+                        collection.add_fulltext_index(fields=['problem'], min_length=3, name='problem_fulltext')
+                        collection.add_fulltext_index(fields=['solution'], min_length=3, name='solution_fulltext')
+                        logger.info('Created fulltext indexes for problem and solution')
+                    except Exception as e:
+                        logger.warning(f'Error creating indexes: {e}. Continuing without all indexes.')
             
             collection_objects[collection_name] = collection
             
@@ -72,7 +85,7 @@ def create_collections(db, collections=None):
             
     return collection_objects
 
-if __name__ == __main__:
+if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(level=logging.INFO, 
                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -81,6 +94,6 @@ if __name__ == __main__:
     try:
         db = get_db()
         collections = create_collections(db)
-        print(Successfully connected to ArangoDB and created collections)
+        print("Successfully connected to ArangoDB and created collections")
     except Exception as e:
-        print(Error:  + str(e))
+        print("Error: " + str(e))
