@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple, Any
 from loguru import logger
 from rapidfuzz import fuzz
 
-from pdf_extractor.code_executor.text_utils import highlight_matching_words
+from pdf_extractor.llm_client.text_utils import highlight_matching_words
 
 def validate_corpus_match(response_text: str, corpus: List[str], threshold: int = 75, task_id: str = "") -> Tuple[bool, Dict[str, Any]]:
     """

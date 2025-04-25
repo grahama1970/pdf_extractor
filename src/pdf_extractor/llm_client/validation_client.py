@@ -28,11 +28,11 @@ from rapidfuzz import fuzz
 import litellm  # for suppress_debug_info
 
 # === Local ===
-from pdf_extractor.code_executor.initialize_litellm_cache import initialize_litellm_cache
-from pdf_extractor.code_executor.text_utils import highlight_matching_words
-from pdf_extractor.code_executor.validators.corpus_validator import validate_corpus_match
-from pdf_extractor.code_executor.validators.code_validator import validate_code_execution, extract_code_from_text
-from pdf_extractor.code_executor.schema_models import QuestionAnswer, CodeResponse
+from pdf_extractor.llm_client.initialize_litellm_cache import initialize_litellm_cache
+from pdf_extractor.llm_client.text_utils import highlight_matching_words
+from pdf_extractor.llm_client.validators.corpus_validator import validate_corpus_match
+from pdf_extractor.llm_client.validators.code_validator import validate_code_execution, extract_code_from_text
+from pdf_extractor.llm_client.schema_models import QuestionAnswer, CodeResponse
 
 # === Configure our logger to drop Provider List lines ===
 logger.remove()
@@ -231,24 +231,33 @@ async def get_llm_response(
 
     # Handle timeout (30s)
     try:
+        # Timeout set to 30 seconds
         responses = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True),
             timeout=30
         )
     except asyncio.TimeoutError:
         logger.error("❌ Timeout waiting for LLM responses (30s)")
-        # cancel any still-pending tasks
+        # Build responses list, handling cancellations gracefully
         responses = []
         for t, task_id in zip(tasks, task_ids):
             if not t.done():
                 t.cancel()
                 logger.error(f"[Task {task_id}] Cancelled due to timeout")
-                responses.append(asyncio.TimeoutError("timed out"))
+                # Append the TimeoutError directly for timed-out tasks
+                responses.append(asyncio.TimeoutError(f"Task {task_id} timed out"))
             else:
                 try:
-                    responses.append(t.result())
+                    # For completed tasks, get the result or exception
+                    result_or_exc = t.result()
+                    responses.append(result_or_exc)
+                except asyncio.CancelledError:
+                    # If task was cancelled *during* result retrieval (less likely but possible)
+                    logger.error(f"[Task {task_id}] Was cancelled during result retrieval after timeout handling.")
+                    responses.append(asyncio.CancelledError(f"Task {task_id} cancelled"))
                 except Exception as e:
-                    logger.error(f"[Task {task_id}] Failed with error: {str(e)}")
+                    # Capture other exceptions from completed tasks
+                    logger.error(f"[Task {task_id}] Completed with error: {str(e)}")
                     responses.append(e)
     finally:
         pbar.close()

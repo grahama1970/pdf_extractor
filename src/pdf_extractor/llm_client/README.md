@@ -128,8 +128,8 @@ The main entry point for using this package is the `get_llm_response` function i
 
 ```python
 # Example usage (conceptual)
-from pdf_extractor.code_executor.validation_client import get_llm_response
-from pdf_extractor.code_executor.schema_models import QuestionAnswer, CodeResponse
+from pdf_extractor.llm_client.validation_client import get_llm_response
+from pdf_extractor.llm_client.schema_models import QuestionAnswer, CodeResponse
 import asyncio
 
 async def main():
