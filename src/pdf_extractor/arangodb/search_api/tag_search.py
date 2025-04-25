@@ -1,51 +1,251 @@
-from arango import ArangoClient
-from pytrie import StringTrie
-from rapidfuzz import fuzz
-import re
+# src/pdf_extractor/arangodb/search_api/tag_search.py
+import sys
+import json
+import time
+from typing import Dict, Any, List, Optional, Tuple
+from loguru import logger
+from arango.database import StandardDatabase
+from arango.exceptions import AQLQueryExecuteError, ArangoServerError
 
-# Define glossary with 15 terms, including multi-word phrases
-GLOSSARY = {
-    Airplane Parts: Components used in the construction and maintenance of aircraft.,
-    Control Tower: A facility that manages aircraft takeoff, landing, and ground traffic.,
-    Jet Engine: A type of engine that propels aircraft by expelling jet streams.,
-    Flight Path: The planned route or trajectory an aircraft follows during flight.,
-    Avionics System: Electronic systems used in aircraft for navigation and communication.,
-    Landing Gear: The undercarriage of an aircraft used during takeoff and landing.,
-    Aerodynamic Design: The shape of an aircraft optimized to reduce air resistance.,
-    Cabin Pressure: The controlled air pressure inside an aircraft cabin for passenger comfort.,
-    "Wing Flaps": "Movable parts on aircraft wings to control lift and drag.",
-    "Radar System": "A system used to detect aircraft and other objects in the airspace.",
-    "Fuel Tank": "A container for storing fuel on an aircraft.",
-    "Cockpit Display": "The interface in the cockpit showing flight information.",
-    "Navigation Aid": "Tools or systems that assist in aircraft navigation.",
-    "Turbulence Alert": "A warning system for detecting unstable air conditions."
-}
+from pdf_extractor.arangodb.config import (
+    COLLECTION_NAME,
+    ALL_DATA_FIELDS_PREVIEW,
+    TAG_ANALYZER
+)
+from pdf_extractor.arangodb.arango_setup import connect_arango, ensure_database
 
-def find_glossary_terms(search_string, similarity_threshold=97):
+def tag_search(
+    db: StandardDatabase,
+    tags: List[str],
+    collections: Optional[List[str]] = None,
+    filter_expr: Optional[str] = None,
+    require_all_tags: bool = False,
+    limit: int = 10,
+    offset: int = 0
+) -> Dict[str, Any]:
     """
-    Search for glossary terms (including multi-word phrases) in the provided string
-    using pytrie and filter with rapidfuzz for whole keyword matches.
+    Search for documents by tags.
     
     Args:
-        search_string (str): The text to search for glossary terms.
-        similarity_threshold (float): Minimum rapidfuzz similarity score (default: 97).
-    
-    Returns:
-        list: List of dictionaries containing matched terms and their definitions.
-    """
-    if not search_string:
-        return []
+        db: ArangoDB database
+        tags: List of tags to search for
+        collections: Optional list of collections to search
+        filter_expr: Optional AQL filter expression
+        require_all_tags: Whether all tags must be present
+        limit: Maximum number of results
+        offset: Result offset for pagination
         
-    # Initialize StringTrie with glossary terms
-    trie = StringTrie()
-    for term in GLOSSARY:
-        trie[term.lower()] = term
+    Returns:
+        Dictionary with search results
+    """
+    start_time = time.time()
+    logger.info(f"Searching for documents with tags: {tags}")
+    
+    try:
+        # Use default collection if not specified
+        if not collections:
+            collections = [COLLECTION_NAME]
+        
+        # Build filter clause based on tags
+        tag_operator = " AND " if require_all_tags else " OR "
+        tag_conditions = []
+        
+        for tag in tags:
+            tag_conditions.append(f'@tag_{len(tag_conditions)} IN doc.tags')
+        
+        # Create tag filter
+        tag_filter = f"FILTER {tag_operator.join(tag_conditions)}"
+        
+        # Add additional filter if provided
+        if filter_expr:
+            tag_filter += f" AND ({filter_expr})"
+        
+        # Build the AQL query
+        aql = f"""
+        FOR doc IN {collections[0]}
+        {tag_filter}
+        SORT doc._key
+        LIMIT {offset}, {limit}
+        RETURN {{
+            "doc": doc,
+            "collection": "{collections[0]}"
+        }}
+        """
+        
+        # Create bind variables for tags
+        bind_vars = {}
+        
+        # Add tag bind variables
+        for i, tag in enumerate(tags):
+            bind_vars[f"tag_{i}"] = tag
+        
+        # Execute the query
+        cursor = db.aql.execute(aql, bind_vars=bind_vars)
+        results = list(cursor)
+        
+        # Get total count
+        count_aql = f"""
+        RETURN LENGTH(
+            FOR doc IN {collections[0]}
+            {tag_filter}
+            RETURN 1
+        )
+        """
+        
+        count_cursor = db.aql.execute(count_aql, bind_vars=bind_vars)
+        total_count = next(count_cursor)
+        
+        end_time = time.time()
+        elapsed = end_time - start_time
+        
+        return {
+            "results": results,
+            "total": total_count,
+            "offset": offset,
+            "limit": limit,
+            "tags": tags,
+            "require_all_tags": require_all_tags,
+            "time": elapsed
+        }
+    
+    except Exception as e:
+        logger.error(f"Tag search error: {e}")
+        return {
+            "results": [],
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "tags": tags,
+            "error": str(e)
+        }
 
-    # Convert search string to lowercase for case-insensitive matching
-    search_string_lower = search_string.lower()
+def validate_tag_search(search_results: Dict[str, Any], fixture_path: str) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
+    """
+    Validate tag search results against known good fixture data.
+    
+    Args:
+        search_results: The results returned from tag_search
+        fixture_path: Path to the fixture file containing expected results
+        
+    Returns:
+        Tuple of (validation_passed, validation_failures)
+    """
+    # Load fixture data
+    try:
+        with open(fixture_path, "r") as f:
+            expected_data = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load fixture data: {e}")
+        return False, {"fixture_loading_error": {"expected": "Valid JSON file", "actual": str(e)}}
+    
+    # Track all validation failures
+    validation_failures = {}
+    
+    # Structural validation
+    if "results" not in search_results:
+        validation_failures["missing_results"] = {
+            "expected": "Results field present",
+            "actual": "Results field missing"
+        }
+        return False, validation_failures
+    
+    # Validate attributes
+    required_attrs = ["total", "offset", "limit", "tags"]
+    for attr in required_attrs:
+        if attr not in search_results:
+            validation_failures[f"missing_{attr}"] = {
+                "expected": f"{attr} field present",
+                "actual": f"{attr} field missing"
+            }
+    
+    # Validate result count matches total
+    if "total" in search_results and "results" in search_results:
+        if search_results["total"] != expected_data.get("total"):
+            validation_failures["total_count"] = {
+                "expected": expected_data.get("total"),
+                "actual": search_results["total"]
+            }
+        
+        if len(search_results["results"]) > search_results["limit"]:
+            validation_failures["results_exceed_limit"] = {
+                "expected": f"<= {search_results['limit']}",
+                "actual": len(search_results["results"])
+            }
+    
+    # Validate tags parameter
+    if "tags" in search_results and "tags" in expected_data:
+        if set(search_results["tags"]) != set(expected_data["tags"]):
+            validation_failures["tags"] = {
+                "expected": expected_data["tags"],
+                "actual": search_results["tags"]
+            }
+    
+    # Validate result content
+    if "results" in search_results and "expected_result_keys" in expected_data:
+        found_keys = set()
+        for result in search_results["results"]:
+            if "doc" in result and "_key" in result["doc"]:
+                found_keys.add(result["doc"]["_key"])
+        
+        expected_keys = set(expected_data["expected_result_keys"])
+        if not expected_keys.issubset(found_keys):
+            missing_keys = expected_keys - found_keys
+            validation_failures["missing_expected_keys"] = {
+                "expected": list(expected_keys),
+                "actual": list(found_keys),
+                "missing": list(missing_keys)
+            }
+    
+    return len(validation_failures) == 0, validation_failures
 
-    # Find potential matches using pytrie and regex for whole keyword
-    potential_matches = set()
-    for term in GLOSSARY:
-        term_lower = term.lower()
-        # Create regex pattern based on whether its a multi-word term or single word
+if __name__ == "__main__":
+    # Configure logging
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
+    
+    # Path to test fixture
+    fixture_path = "src/test_fixtures/tag_search_expected.json"
+    
+    try:
+        # Set up database connection
+        client = connect_arango()
+        db = ensure_database(client)
+        
+        # Create a test fixture if it doesn't exist
+        try:
+            with open(fixture_path, "r") as f:
+                fixture_exists = True
+        except FileNotFoundError:
+            # Create a minimal fixture file
+            with open(fixture_path, "w") as f:
+                json.dump({
+                    "total": 0,
+                    "tags": ["python", "json"],
+                    "expected_result_keys": []
+                }, f)
+        
+        # Run a test tag search
+        test_tags = ["python", "json"]  # Known tags that should match fixture results
+        search_results = tag_search(
+            db=db,
+            tags=test_tags,
+            limit=10
+        )
+        
+        # Validate the results
+        validation_passed, validation_failures = validate_tag_search(search_results, fixture_path)
+        
+        # Report validation status
+        if validation_passed:
+            print("✅ VALIDATION COMPLETE - All tag search results match expected values")
+            sys.exit(0)
+        else:
+            print("❌ VALIDATION FAILED - Tag search results don't match expected values") 
+            print(f"FAILURE DETAILS:")
+            for field, details in validation_failures.items():
+                print(f"  - {field}: Expected: {details['expected']}, Got: {details['actual']}")
+            print(f"Total errors: {len(validation_failures)} fields mismatched")
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ ERROR: {str(e)}")
+        sys.exit(1)

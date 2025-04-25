@@ -1,49 +1,26 @@
 # src/pdf_extractor/arangodb/config.py
-import sys
+import os
 
-# Graph and edge collection names
-EDGE_COLLECTION_NAME = "document_relationships"
-GRAPH_NAME = "document_graph"
+# ArangoDB Connection Settings
+ARANGO_HOST = os.environ.get("ARANGO_HOST", "http://localhost:8529")
+ARANGO_USER = os.environ.get("ARANGO_USER", "root")
+ARANGO_PASSWORD = os.environ.get("ARANGO_PASSWORD", "")
+ARANGO_DB_NAME = os.environ.get("ARANGO_DB_NAME", "pdf_extractor")
+
+# Collection & View Names
 COLLECTION_NAME = "documents"
-ARANGO_DB_NAME = "pdf_extractor_db"
-VIEW_NAME = "document_search_view"  # Added for hybrid_search
+EDGE_COLLECTION_NAME = "relationships"
+VIEW_NAME = "document_view"
+GRAPH_NAME = "knowledge_graph"
 
-# ArangoDB connection settings
-ARANGO_HOST = "http://localhost:8529"
-ARANGO_USER = "root"
-ARANGO_PASSWORD = "openSesame"
-
-# Relationship types
-RELATIONSHIP_TYPE_SIMILAR = "SIMILAR"
-RELATIONSHIP_TYPE_REFERENCES = "REFERENCES"
-RELATIONSHIP_TYPE_SHARED_TOPIC = "SHARED_TOPIC"
-RELATIONSHIP_TYPE_PREREQUISITE = "PREREQUISITE"
-RELATIONSHIP_TYPE_CAUSAL = "CAUSAL"
-
-# Validation settings
-RATIONALE_MIN_LENGTH = 50
-CONFIDENCE_SCORE_RANGE = (1, 5)
-
-# Search fields for hybrid_search
-SEARCH_FIELDS = ["content", "problem", "tags"]
-ALL_DATA_FIELDS_PREVIEW = ["_key", "problem", "tags"]
-TEXT_ANALYZER = "text_en"
-TAG_ANALYZER = "identity"
-
-# Embedding settings
+# Embedding Configuration
 EMBEDDING_MODEL = "text-embedding-ada-002"
 EMBEDDING_DIMENSIONS = 1536
 
-if __name__ == "__main__":
-    checks = [
-        isinstance(EDGE_COLLECTION_NAME, str) and EDGE_COLLECTION_NAME,
-        isinstance(GRAPH_NAME, str) and GRAPH_NAME,
-        isinstance(COLLECTION_NAME, str) and COLLECTION_NAME,
-        RATIONALE_MIN_LENGTH > 0,
-        CONFIDENCE_SCORE_RANGE[0] <= CONFIDENCE_SCORE_RANGE[1]
-    ]
-    if all(checks):
-        print("✅ Configuration validation passed")
-        sys.exit(0)
-    print("❌ Configuration validation failed")
-    sys.exit(1)
+# Search Configuration
+SEARCH_FIELDS = ["problem", "solution", "context", "title", "tags"]
+ALL_DATA_FIELDS_PREVIEW = ["_key", "problem", "solution", "tags", "title", "context"]
+
+# Analyzer Configuration
+TEXT_ANALYZER = "text_en"
+TAG_ANALYZER = "text_en"

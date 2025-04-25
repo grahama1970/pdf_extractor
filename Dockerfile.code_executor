@@ -1,0 +1,39 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    g++ \
+    libblas3 \
+    liblapack3 \
+    libpng16-16 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY code_executor/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install allowed Python modules
+RUN pip install --no-cache-dir numpy pandas matplotlib scipy scikit-learn
+
+# Copy application code
+COPY code_executor/app/ .
+RUN chmod +x entry_point.sh
+
+# Set environment variables
+ENV EXECUTION_TIMEOUT=120
+ENV MAX_MEMORY_MB=2048
+ENV TEMP_DIR=/tmp
+ENV ALLOWED_MODULES=numpy,pandas,matplotlib,scipy,sklearn
+ENV BYPASS_SETUP=true
+
+# Expose port
+EXPOSE 8000
+
+# Run the execution service
+ENTRYPOINT ["./entry_point.sh"]

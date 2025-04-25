@@ -9,9 +9,11 @@ calls to language models via the LiteLLM library. It incorporates features like:
 - Handling of both streaming and non-streaming responses.
 - Integration with LiteLLM caching (setup is expected externally).
 - Loading environment variables and project configurations.
+- **Conditional loading and passing of Vertex AI credentials, project, and location.**
 
 Relevant Documentation:
 - LiteLLM `acompletion`: https://docs.litellm.ai/docs/completion/async_completions
+- LiteLLM Vertex AI: https://docs.litellm.ai/docs/providers/vertex
 - Tenacity Retrying Library: https://tenacity.readthedocs.io/en/latest/
 - Pydantic Models: https://docs.pydantic.dev/latest/
 - Project LLM Interaction Notes: ../../repo_docs/llm_interaction.md (Placeholder)
@@ -37,6 +39,8 @@ from pydantic import BaseModel, Field
 import asyncio
 import os
 import copy
+import json # Added for Vertex credentials
+from pathlib import Path # Added for Vertex credentials path
 from typing import Any, AsyncGenerator, Dict, List, Type, Union, Optional, Tuple
 from pydantic import BaseModel
 from types import SimpleNamespace
@@ -49,6 +53,7 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
+    RetryCallState # Import RetryCallState
 )
 
 from pdf_extractor.llm_integration.multimodal_utils import ( # Corrected to relative import
@@ -57,11 +62,12 @@ from pdf_extractor.llm_integration.multimodal_utils import ( # Corrected to rela
 )
 from pdf_extractor.llm_integration.initialize_litellm_cache import initialize_litellm_cache # Corrected to relative import
 
-# Load environment variables Globally
-# Environment variables should be loaded by the application entry point or config management
-# project_dir = get_project_root() # Removed
-# load_env_file() # Removed
+# litellm.set_verbose = False # Keep verbose logging off unless needed
 
+# Define the path to the Vertex AI credentials file
+# Assuming the script runs from the project root or the path is relative to project root
+VERTEX_CREDENTIALS_PATH = Path("src/pdf_extractor/vertex_ai_service_account.json")
+DEFAULT_VERTEX_LOCATION = "us-central1" # Define default location
 
 # Helper function to validate and update LLM config
 def validate_update_config(
@@ -71,26 +77,30 @@ def validate_update_config(
     Validates and updates LLM config to meet requirements for JSON/structured responses.
 
     Args:
-        llm_config: The LLM configuration dictionary
+        config: The configuration dictionary containing llm_config and directories.
 
     Returns:
         Dict[str, Any]: Updated LLM config with proper JSON formatting instructions
+                        and potentially formatted multimodal messages.
 
     Raises:
-        ValueError: If JSON requirements cannot be met
+        ValueError: If messages are missing or multimodal formatting fails.
     """
     llm_config = config.get("llm_config", {})
     directories = config.get("directories", {})
     if not llm_config.get("messages", []):
         raise ValueError("A message object is required to query the LLM")
 
-    response_format = llm_config.get("response_format")
+    # Deep copy to avoid modifying the original config dict
+    updated_llm_config = copy.deepcopy(llm_config)
+    messages = updated_llm_config.get("messages", [])
+
+    response_format = updated_llm_config.get("response_format")
     requires_json = response_format == "json" or (
         isinstance(response_format, type) and issubclass(response_format, BaseModel)
     )
 
     if requires_json:
-        messages = llm_config.get("messages", []).copy()
         system_messages = [msg for msg in messages if msg.get("role") == "system"]
 
         if not system_messages:
@@ -115,145 +125,178 @@ def validate_update_config(
                     + system_messages[0]["content"]
                 )
 
-        # Check for multimodal content
-        if is_multimodal(messages):
-            # hardcoded for now
-            image_directory = directories.get("image_directory", "")
-            max_size_kb = llm_config.get("max_image_size_kb", 500)
+    # Check for multimodal content AFTER potential system message modification
+    if is_multimodal(messages):
+        image_directory = directories.get("image_directory", "")
+        max_size_kb = updated_llm_config.get("max_image_size_kb", 500)
+        try:
             messages = format_multimodal_messages(
                 messages, image_directory, max_size_kb
             )
+        except Exception as e:
+             logger.error(f"Failed to format multimodal messages: {e}", exc_info=True)
+             raise ValueError(f"Error processing images for multimodal input: {e}")
 
-        llm_config = copy.deepcopy(llm_config)
-        llm_config["messages"] = messages
-
-    return llm_config
+    updated_llm_config["messages"] = messages
+    return updated_llm_config
 
 
-# Main
-from tenacity import RetryCallState
+# Define a callback function for logging retries
+def log_retry_attempt(retry_state: RetryCallState):
+    """Logs details of a retry attempt."""
+    exception = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.warning(
+        f"Retrying LLM call (Attempt {retry_state.attempt_number}) "
+        f"due to exception: {exception}" # Safely access exception
+    )
+
+# Restore retry decorator
 @retry( # type: ignore
-    wait=wait_exponential(multiplier=1, min=4, max=10),  # Exponential backoff
+    wait=wait_exponential(multiplier=1, min=2, max=10),  # Exponential backoff (adjusted min)
     stop=stop_after_attempt(3),  # Max 3 retries
-    retry=retry_if_exception_type(Exception),  # Retry on any exception, consider refining later
+    retry=retry_if_exception_type(Exception),  # Retry on any exception
+    before_sleep=log_retry_attempt, # Log before sleeping
 )
-async def litellm_call(config: Dict[str, Any]) -> Union[ModelResponse, BaseModel, Dict[str, Any], str, AsyncGenerator[str, None]]: # Added ModelResponse
+async def litellm_call(config: Dict[str, Any]) -> Union[ModelResponse, BaseModel, Dict[str, Any], str, AsyncGenerator[str, None]]:
     """
     Makes an asynchronous call to a language model using LiteLLM with retries.
-
     Handles configuration validation, JSON/Pydantic response formatting,
-    multimodal inputs, and streaming.
-
-    Args:
-        config: A dictionary containing 'llm_config' and optional 'directories'.
-            llm_config (Dict[str, Any]): LiteLLM parameters (model, messages, temp, etc.).
-                - response_format: Can be 'json', a Pydantic model class, or None.
-                - stream (bool): Whether to stream the response.
-                - caching (bool): Whether to use LiteLLM caching.
-                - messages (List[Dict[str, Any]]): The list of messages for the prompt.
-            directories (Dict[str, str]): Optional paths, e.g., 'image_directory'.
-
-    Returns:
-        Union[BaseModel, Dict[str, Any], str, AsyncGenerator[str, None]]:
-            - Pydantic model instance if response_format is a Pydantic class.
-            - Dictionary if response_format is 'json'.
-            - String containing the full response text if stream=False and no specific format.
-            - An async generator yielding response chunks if stream=True.
-
-    Raises:
-        ValueError: If the configuration is invalid (e.g., missing messages).
-        litellm.exceptions.BadRequestError: If the LLM API reports a bad request.
-        Exception: Other exceptions during the API call or processing, after retries.
+    multimodal inputs, streaming, and Vertex AI credential/project/location injection.
     """
+    model_name = "unknown" # Initialize model_name
     try:
         llm_config = config.get("llm_config", {})
-        # directories = config.get("directories", {}) # directories are used within validate_update_config
+        
+        # Validate/update config (handles messages, JSON hints, multimodal)
+        validated_llm_config = validate_update_config(config)
 
-        llm_config = validate_update_config(config)
+        # Determine if JSON output is required based on the original config
+        original_response_format = llm_config.get("response_format") # Use original config for this check
+        requires_json = original_response_format == "json" or (
+            isinstance(original_response_format, type) and issubclass(original_response_format, BaseModel)
+        )
 
-        # Default to plain text if response_format is not provided
-        response_format = llm_config.get("response_format", None)
+        model_name = validated_llm_config.get("model", "openai/gpt-4o-mini") # Ensure a default model is set
 
         api_params = {
-            "model": llm_config.get("model", "openai/gpt-4o-mini"), # Ensure a default model is set
-            "messages": llm_config["messages"], # Use validated/updated messages
-            "temperature": llm_config.get("temperature", 0.2),
-            "max_tokens": llm_config.get("max_tokens", 1000),
-            "stream": llm_config.get("stream", False),
-            "caching": llm_config.get("caching", True),
-            "metadata": {"request_id": llm_config.get("request_id"), "hidden": True},
+            "model": model_name,
+            "messages": validated_llm_config["messages"], # Use validated/updated messages
+            "temperature": validated_llm_config.get("temperature", 0.2),
+            "max_tokens": validated_llm_config.get("max_tokens", 1000),
+            "stream": validated_llm_config.get("stream", False),
+            "caching": validated_llm_config.get("caching", True), # Default to True
+            "metadata": {"request_id": validated_llm_config.get("request_id"), "hidden": True},
         }
-        if llm_config.get("api_base", None):
-            # Remove /v1/completions from api_base if present
-            # Strange LiteLLM behavior, but it works
-            api_base = llm_config["api_base"]
+        
+        # Add api_base if present
+        if validated_llm_config.get("api_base"):
+            api_base = validated_llm_config["api_base"]
+            # LiteLLM expects api_base without /v1/completions for some providers
             if api_base.endswith("/v1/completions"):
-                api_base = api_base.replace("/v1/completions", "/v1")
-                api_params["api_base"] = api_base
+                api_base = api_base.rsplit("/v1/completions", 1)[0] + "/v1"
+            elif api_base.endswith("/v1"): # Ensure it ends with /v1 if needed
+                 pass # Already correct
+            # Add other potential suffixes if necessary
+            api_params["api_base"] = api_base
 
-        # Add response_format only if explicitly provided
-        if response_format:
-            api_params["response_format"] = response_format
+        # Enforce JSON mode if required
+        if requires_json:
+            logger.debug("Setting response_format to enforce JSON object output.")
+            api_params["response_format"] = {"type": "json_object"}
+        # Pass Pydantic model directly if specified (LiteLLM handles this via instructor)
+        elif isinstance(original_response_format, type) and issubclass(original_response_format, BaseModel):
+             api_params["response_model"] = original_response_format
 
+
+        # --- Vertex AI Specific Parameters ---
+        if model_name.startswith("vertex_ai/"): 
+            logger.debug(f"Vertex AI model detected ({model_name}). Adding Vertex parameters.")
+            
+            # Add Location
+            api_params["vertex_location"] = os.getenv("VERTEX_LOCATION", DEFAULT_VERTEX_LOCATION)
+            logger.debug(f"Using Vertex Location: {api_params['vertex_location']}")
+
+            # Add Project ID
+            vertex_project_id = os.getenv("VERTEX_PROJECT_ID")
+            if vertex_project_id:
+                api_params["vertex_project"] = vertex_project_id
+                logger.debug(f"Using Vertex Project ID from env var: {vertex_project_id}")
+            else:
+                 # Log warning if project ID is missing, as it's often required
+                 logger.warning("VERTEX_PROJECT_ID environment variable not set. Vertex AI calls might fail if not implicitly handled by credentials/ADC.")
+
+            # Add Credentials (if file exists)
+            if VERTEX_CREDENTIALS_PATH.exists():
+                try:
+                    # Pass the path directly, LiteLLM can handle it
+                    api_params["vertex_credentials"] = str(VERTEX_CREDENTIALS_PATH.resolve())
+                    logger.debug(f"Using Vertex Credentials Path: {api_params['vertex_credentials']}")
+                except Exception as cred_err: # Catch potential errors resolving path
+                    logger.error(f"Failed to resolve Vertex AI credentials path {VERTEX_CREDENTIALS_PATH}: {cred_err}")
+            else:
+                logger.warning(f"Vertex AI credentials file not found at {VERTEX_CREDENTIALS_PATH}. Relying on Application Default Credentials (ADC) if available.")
+                if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+                     logger.warning("GOOGLE_APPLICATION_CREDENTIALS env var not set and local credential file missing. Vertex AI calls might fail if gcloud auth application-default login was not run.")
+        # --- End Vertex AI Specific Parameters ---
+
+
+        logger.debug(f"Calling litellm.acompletion with params: { {k: v for k, v in api_params.items() if k != 'vertex_credentials'} }") # Avoid logging full creds path if used
         response = await litellm.acompletion(**api_params) # type: ignore
 
         # Handle streaming response
         if api_params["stream"]:
-            # Check if response is an async generator/iterable
             if isinstance(response, AsyncGenerator):
-                # Return the async generator directly for streaming
                 async def stream_generator():
                     full_content = ""
-                    async for chunk in response: # Pylance should now understand response is iterable
-                        # Assuming chunk structure is correct based on LiteLLM streaming
+                    async for chunk in response:
                         try:
-                            content = chunk.choices[0].delta.content or ""
+                            # Add type ignore for Pylance limitation with stream chunks
+                            content = chunk.choices[0].delta.content or "" # type: ignore
                             full_content += content
-                            yield content # Yield content chunks
-                        except (AttributeError, IndexError):
+                            yield content
+                        except (AttributeError, IndexError, TypeError):
                             logger.warning(f"Could not extract content from stream chunk: {chunk}")
-                            continue # Skip problematic chunks
-                    # Optionally log the full content after streaming is complete
-                    # logger.debug(f"Full streamed content: {full_content}")
-
+                            continue
+                    # logger.debug(f"Full streamed content: {full_content}") # Optional: log full content
                 return stream_generator()
             else:
-                # Handle unexpected non-iterable response in streaming mode
                 logger.error(f"Expected AsyncGenerator for streaming, got {type(response)}")
                 raise TypeError(f"Unexpected response type for streaming call: {type(response)}")
         else:
             # Handle non-streaming response
             if isinstance(response, ModelResponse):
-                hidden_params = getattr(response, '_hidden_params', {}) # Use getattr for safety
-                logger.info(f"Cache Hit: {hidden_params.get('cache_hit', 'N/A')}") # Handle missing cache info
-                try:
-                    # type: ignore because Pylance struggles with isinstance check narrowing
-                    content = response.choices[0].message.content # Access should be safer now
-                except (AttributeError, IndexError):
-                    logger.error("Failed to extract content from non-streaming response structure.")
-                    content = None # Handle missing content
-
-                # Set cache_hit in _hidden_params if not already set
+                hidden_params = getattr(response, '_hidden_params', {})
+                logger.info(f"Cache Hit: {hidden_params.get('cache_hit', 'N/A')}")
+                # Set cache_hit if not present (might happen on first call)
                 if "cache_hit" not in hidden_params:
-                    hidden_params["cache_hit"] = False # Corrected indentation
+                     hidden_params["cache_hit"] = False
+                     # Attempt to update the response object if possible (might not be mutable)
+                     try:
+                          setattr(response, '_hidden_params', hidden_params)
+                     except AttributeError:
+                          pass # Ignore if attribute cannot be set
 
-                # Ensure the return type matches the non-streaming case in the Union
-                return response # Return the validated ModelResponse
+                # Return the full ModelResponse object for non-streaming
+                return response
+            elif isinstance(response, BaseModel):
+                 # If LiteLLM returns a Pydantic model directly (via instructor)
+                 logger.info("Received Pydantic model directly from LiteLLM.")
+                 return response
             else:
-                 # Handle unexpected type for non-streaming
-                 logger.error(f"Expected ModelResponse for non-streaming, got {type(response)}")
+                 logger.error(f"Expected ModelResponse or Pydantic Model for non-streaming, got {type(response)}")
                  raise TypeError(f"Unexpected response type for non-streaming call: {type(response)}")
 
-    except BadRequestError as e: # Use the explicitly imported exception
-        logger.error(f"BadRequestError: {e}")
-        raise
+    except BadRequestError as e:
+        logger.error(f"BadRequestError calling LLM ({model_name}): {e}") # model_name is now guaranteed to be defined
+        raise # Re-raise after logging
     except Exception as e:
-        logger.error(f"Error calling LLM: {e}", exc_info=True) # Add exc_info for better debugging
-        raise
+        # This will catch errors after retries have been exhausted
+        logger.error(f"Error calling LLM ({model_name}) after retries: {e}", exc_info=True) # model_name is now guaranteed to be defined
+        raise # Re-raise the final exception
 
 
-# --- Task Decomposition and Synthesis Logic (Example Implementation) ---
-
+# --- Task Decomposition and Synthesis Logic (Example Implementation - Unchanged) ---
+# ... (Keep the existing decompose, simulate, synthesize, handle_complex_query functions) ...
 def decompose_query_france_example(query: str) -> list[str]:
     """
     Simulates decomposition for the specific France clothing query.
@@ -359,9 +402,7 @@ async def handle_complex_query(query: str, config: Dict[str, Any]) -> str:
     final_answer = synthesize_results_france_example(query, sub_answers)
 
     return final_answer
-
 # --- End of Task Decomposition Logic ---
-
 
 
 # Usage Example & Basic Validation
@@ -379,10 +420,9 @@ async def main():
     # Define a simple configuration for a non-streaming text call
     # NOTE: This requires appropriate environment variables (like OPENAI_API_KEY)
     # or a correctly configured LiteLLM setup to run successfully.
-    # Using a potentially free/low-cost model for testing.
     test_config = {
         "llm_config": {
-            "model": "openai/gpt-4o-mini", # Or another accessible model
+            "model": "openai/gpt-4o-mini", # Use a non-Vertex model for basic test
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": "Briefly explain the concept of asynchronous programming."},
@@ -390,65 +430,44 @@ async def main():
             "temperature": 0.1,
             "max_tokens": 50,
             "stream": False,
-            "caching": False, # Disable caching for validation consistency if needed
-            # "api_base": "YOUR_API_BASE_IF_NEEDED", # Add if using a local/proxy endpoint
+            "caching": False, # Disable caching for validation consistency
         }
     }
 
     validation_passed = False
-    # Define expected output for the specific query - Adjusted to be less brittle
     EXPECTED_OUTPUT_SUBSTRING = "allows tasks" # More general substring
 
     try:
-            # --- MOCKING REMOVED ---
-            # Making a real call to litellm_call
             response = await litellm_call(test_config)
-
-            # --- VALIDATION ---
-            # We expect a non-streaming response, which should be the LiteLLM ModelResponse object
-            # The actual content is accessed via response.choices[0].message.content
-            logger.info(f"Raw response type: {type(response)}") # Corrected indentation
+            logger.info(f"Raw response type: {type(response)}")
 
             # --- VALIDATION for Non-Streaming ---
-            # Check if the response is the expected ModelResponse type
-            if isinstance(response, ModelResponse): # Corrected indentation
-                # Access attributes directly now that type is confirmed
+            if isinstance(response, ModelResponse):
                 try:
-                    # type: ignore because Pylance struggles with isinstance check narrowing
-                    content = response.choices[0].message.content # Add type ignore again
-                    # Check if content is a non-empty string before using len/slicing
+                    # Add type ignore for Pylance limitation
+                    content = response.choices[0].message.content # type: ignore
                     if isinstance(content, str) and content:
                         logger.info(f"Response Content (first {min(50, len(content))} chars): {content[:50]}...")
-                        # Validate if the expected substring is present
                         if EXPECTED_OUTPUT_SUBSTRING.lower() in content.lower():
                             logger.success(f"✅ Validation passed: Expected substring '{EXPECTED_OUTPUT_SUBSTRING}' found in response.")
                             validation_passed = True
                         else:
                             logger.error(f"❌ Validation failed: Expected substring '{EXPECTED_OUTPUT_SUBSTRING}' NOT found in response.")
-                            validation_passed = False
-                    elif isinstance(content, str): # It's a string, but empty
+                    elif isinstance(content, str):
                         logger.error("❌ Validation failed: Response content is an empty string.")
-                        validation_passed = False
-                    else: # It's not a string (e.g., None)
+                    else:
                         logger.error(f"❌ Validation failed: Response content is not a string (type: {type(content)}).")
-                        validation_passed = False
                 except (AttributeError, IndexError, TypeError) as e:
                     logger.error(f"❌ Validation failed: Error accessing content in ModelResponse: {e}")
-                    logger.debug(f"ModelResponse structure: {response}") # Log structure on error
-                    validation_passed = False
-            # Allow Pydantic models as valid non-streaming responses too
-            elif isinstance(response, BaseModel): # Corrected indentation
-                 logger.warning(f"Validation partially passed: Received a Pydantic model response ({type(response)}), skipping content check for this test.")
-                 validation_passed = True # Assume valid type, but content not checked here
-            # Removed redundant elif check for str, dict, AsyncGenerator (Confirming removal)
-            else: # Corrected indentation
-                # Handles any type not explicitly checked above (ModelResponse, BaseModel)
-                logger.error(f"❌ Validation failed: Unexpected response type received in main: {type(response)}")
-                validation_passed = False
+                    logger.debug(f"ModelResponse structure: {response}")
+            elif isinstance(response, BaseModel):
+                 logger.warning(f"Validation partially passed: Received a Pydantic model response ({type(response)}), skipping content check.")
+                 validation_passed = True # Assume valid type if Pydantic model received
+            else:
+                logger.error(f"❌ Validation failed: Unexpected response type received: {type(response)}")
 
     except TypeError as e:
-            # Catch the TypeError raised by litellm_call for unexpected types
-            logger.error(f"Validation failed: {e}")
+            logger.error(f"Validation failed due to TypeError: {e}")
     except Exception as e:
             logger.error(f"Error during litellm_call test: {e}", exc_info=True)
             logger.warning("Ensure necessary API keys/endpoints are configured for this test.")
@@ -460,15 +479,6 @@ async def main():
     else:
         print("\n❌ VALIDATION FAILED - Basic litellm_call test did not pass.")
         sys.exit(1)
-
-    # --- Complex Query Simulation (Commented Out - Not core validation) ---
-    # complex_query = "What clothes should I wear in Wintertime in the capital city of France?"
-    # complex_config = {}
-    # print(f"\n--- Testing Complex Query Handling ---")
-    # final_result = await handle_complex_query(complex_query, complex_config)
-    # print("\n--- FINAL SYNTHESIZED RESULT ---")
-    # print(final_result)
-    # print("----------------------------------\n")
 
 
 if __name__ == "__main__":

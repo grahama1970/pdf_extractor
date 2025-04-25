@@ -1,7 +1,7 @@
 # src/pdf_extractor/arangodb/search_api/graph_traverse.py
 import sys
 import json
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 from loguru import logger
 from arango.database import StandardDatabase
 from pdf_extractor.arangodb.config import (
@@ -106,76 +106,132 @@ def graph_traverse(
         logger.error(f"Traversal error: {e}")
         return {"results": [], "count": 0, "error": str(e)}
 
-def validate_traversal(traversal_results: Dict[str, Any], fixture_path: str) -> bool:
-    """Validate traversal results against fixture."""
-    validation_failures = {}
-    try:
-        with open(fixture_path, "r") as f:
-            expected = json.load(f)
+def validate_traversal(traversal_results: Dict[str, Any], fixture_path: str) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
+    """
+    Validate traversal results against expected fixture data.
+    
+    Args:
+        traversal_results: Results from graph_traverse function
+        fixture_path: Path to fixture JSON file with expected results
         
-        # Validate structure
+    Returns:
+        Tuple of (validation_passed, validation_failures)
+    """
+    validation_failures = {}
+    
+    try:
+        # Load fixture data
+        with open(fixture_path, "r") as f:
+            expected_data = json.load(f)
+        
+        # Structural validation
         if "results" not in traversal_results:
-            validation_failures["results"] = {
-                "expected": "present",
-                "actual": "missing"
+            validation_failures["missing_results"] = {
+                "expected": "Results field present",
+                "actual": "Results field missing"
+            }
+        
+        if "count" not in traversal_results:
+            validation_failures["missing_count"] = {
+                "expected": "Count field present",
+                "actual": "Count field missing"
             }
             
-        if "count" not in traversal_results:
-            validation_failures["count"] = {
-                "expected": "present",
-                "actual": "missing"
+        if "params" not in traversal_results:
+            validation_failures["missing_params"] = {
+                "expected": "Params field present",
+                "actual": "Params field missing"
             }
         
-        # Validate content
-        if "expected_count" in expected and traversal_results.get("count", 0) < expected["expected_count"]:
-            validation_failures["count"] = {
-                "expected": f">={expected['expected_count']}",
-                "actual": traversal_results.get("count", 0)
-            }
+        # Content validation
+        if "expected_count" in expected_data:
+            if traversal_results.get("count", 0) < expected_data["expected_count"]:
+                validation_failures["count_value"] = {
+                    "expected": f">={expected_data['expected_count']}",
+                    "actual": traversal_results.get("count", 0)
+                }
+        
+        # Params validation
+        if "expected_params" in expected_data and "params" in traversal_results:
+            expected_params = expected_data["expected_params"]
+            actual_params = traversal_results["params"]
+            
+            for param_name in expected_params:
+                if param_name not in actual_params:
+                    validation_failures[f"missing_param_{param_name}"] = {
+                        "expected": f"{param_name} present",
+                        "actual": f"{param_name} missing"
+                    }
+                elif actual_params[param_name] != expected_params[param_name]:
+                    validation_failures[f"param_{param_name}"] = {
+                        "expected": expected_params[param_name],
+                        "actual": actual_params[param_name]
+                    }
+        
+        # Result structure validation
+        if "results" in traversal_results and len(traversal_results["results"]) > 0:
+            first_result = traversal_results["results"][0]
+            required_fields = ["vertex", "edge", "path"]
+            
+            for field in required_fields:
+                if field not in first_result:
+                    validation_failures[f"result_missing_{field}"] = {
+                        "expected": f"{field} present in result",
+                        "actual": f"{field} missing in result"
+                    }
         
         return len(validation_failures) == 0, validation_failures
+    
     except Exception as e:
         logger.error(f"Validation error: {e}")
-        return False, {"validation_error": str(e)}
+        return False, {"validation_error": {"expected": "Successful validation", "actual": str(e)}}
 
 if __name__ == "__main__":
+    # Configure logging
     logger.remove()
     logger.add(sys.stderr, level="INFO")
     
-    # Initialize ArangoDB connection
-    client = connect_arango()
-    db = ensure_database(client)
+    # Path to test fixture
+    fixture_path = "src/test_fixtures/traversal_expected.json"
     
-    # Create test data
-    vertex_collection = db.collection(COLLECTION_NAME)
-    
-    # Check if we have at least one vertex, create if needed
-    if vertex_collection.count() == 0:
-        test_key = "test_root_vertex"
-        vertex_collection.insert({
-            "_key": test_key,
-            "content": "Root test vertex for traversal",
-            "tags": ["test", "traversal"]
-        })
-    else:
-        # Use the first document as starting point
-        first_doc = next(vertex_collection.all())
-        test_key = first_doc["_key"]
-    
-    # Run traversal
-    results = graph_traverse(db, test_key, min_depth=1, max_depth=2)
-    
-    # Validate results
-    validation_passed, validation_failures = validate_traversal(
-        results, "src/test_fixtures/traversal_expected.json"
-    )
-    
-    if validation_passed:
-        print("✅ Traversal validation passed")
-    else:
-        print("❌ VALIDATION FAILED - Traversal results don't match expected values")
-        print("FAILURE DETAILS:")
-        for field, details in validation_failures.items():
-            print(f"  - {field}: Expected: {details['expected']}, Got: {details['actual']}")
-        print(f"Total errors: {len(validation_failures)} fields mismatched")
+    try:
+        # Initialize ArangoDB connection
+        client = connect_arango()
+        db = ensure_database(client)
+        
+        # Create test data or use existing
+        vertex_collection = db.collection(COLLECTION_NAME)
+        
+        # Check if we have at least one vertex, create if needed
+        if vertex_collection.count() == 0:
+            test_key = "test_root_vertex"
+            vertex_collection.insert({
+                "_key": test_key,
+                "content": "Root test vertex for traversal",
+                "tags": ["test", "traversal"]
+            })
+        else:
+            # Use the first document as starting point
+            first_doc = next(vertex_collection.all())
+            test_key = first_doc["_key"]
+        
+        # Run traversal
+        results = graph_traverse(db, test_key, min_depth=1, max_depth=2)
+        
+        # Validate results
+        validation_passed, validation_failures = validate_traversal(results, fixture_path)
+        
+        # Report validation status
+        if validation_passed:
+            print("✅ VALIDATION COMPLETE - All graph traversal results match expected values")
+            sys.exit(0)
+        else:
+            print("❌ VALIDATION FAILED - Graph traversal results don't match expected values") 
+            print(f"FAILURE DETAILS:")
+            for field, details in validation_failures.items():
+                print(f"  - {field}: Expected: {details['expected']}, Got: {details['actual']}")
+            print(f"Total errors: {len(validation_failures)} fields mismatched")
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ ERROR: {str(e)}")
         sys.exit(1)

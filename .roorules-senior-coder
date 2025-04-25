@@ -121,7 +121,7 @@ reuse_policy:
   d. Handle connection errors gracefully
   e. Log all polling attempts and results
 
-# ==============================================
+<!-- # ==============================================
 # Lesson Logging and Management
 # ==============================================
 - **Lesson Logging Rule:** Add concise lesson entries to ArangoDB for novel techniques/patterns.
@@ -294,4 +294,4 @@ umb:
     - "Next assistant will have complete context"
     - "Note: God Mode override is TEMPORARY"
   override_file_restrictions: true
-  override_mode_restrictions: true
+  override_mode_restrictions: true -->

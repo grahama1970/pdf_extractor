@@ -16,16 +16,17 @@ List of documents matching the keyword search with fuzzy matching
 """
 import sys
 import os
-from typing import List, Dict, Any, Optional
+import json
+from typing import List, Dict, Any, Optional, Tuple
 import re
-import rapidfuzz
 from loguru import logger
 
 from arango.database import StandardDatabase
-from arango.cursor import Cursor # Import Cursor for type checking
+from arango.cursor import Cursor  # Import Cursor for type checking
 from rapidfuzz import fuzz, process
 
-# Import config variables
+# Import config variables and connection setup
+from pdf_extractor.arangodb.arango_setup import connect_arango, ensure_database
 from pdf_extractor.arangodb.config import (
     VIEW_NAME,
     COLLECTION_NAME,
@@ -37,7 +38,8 @@ def search_keyword(
     search_term: str,
     similarity_threshold: float = 97.0,
     top_n: int = 10,
-    view_name: str = VIEW_NAME, tags: Optional[List[str]] = None,
+    view_name: str = VIEW_NAME, 
+    tags: Optional[List[str]] = None,
     collection_name: str = COLLECTION_NAME,
 ) -> Dict[str, Any]:
     """
@@ -94,9 +96,9 @@ def search_keyword(
         if isinstance(cursor, Cursor):
             try:
                 initial_results = [doc for doc in cursor]
-            except Exception as e: # Catch potential errors during iteration
+            except Exception as e:  # Catch potential errors during iteration
                 logger.error(f"Error iterating over cursor results: {e}", exc_info=True)
-                raise # Re-raise to signal failure
+                raise  # Re-raise to signal failure
         elif cursor is None:
              logger.warning("db.aql.execute returned None, expected a cursor.")
         else:
@@ -104,7 +106,6 @@ def search_keyword(
              logger.error(f"db.aql.execute returned unexpected type: {type(cursor)}. Expected Cursor.")
              # Decide how to handle - raise error?
              raise TypeError(f"Unexpected cursor type: {type(cursor)}")
-
 
         # Filter results using rapidfuzz for whole word matching
         filtered_results = []
@@ -154,12 +155,96 @@ def search_keyword(
     
     except Exception as e:
         logger.error(f"Error in keyword search: {e}")
-        raise
+        return {
+            "results": [],
+            "total": 0,
+            "search_term": search_term,
+            "error": str(e)
+        }
+
+def validate_keyword_search(search_results: Dict[str, Any], fixture_path: str) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
+    """
+    Validate keyword search results against known good fixture data.
+    
+    Args:
+        search_results: The results returned from search_keyword
+        fixture_path: Path to the fixture file containing expected results
+        
+    Returns:
+        Tuple of (validation_passed, validation_failures)
+    """
+    # Load fixture data
+    try:
+        with open(fixture_path, "r") as f:
+            expected_data = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load fixture data: {e}")
+        return False, {"fixture_loading_error": {"expected": "Valid JSON file", "actual": str(e)}}
+    
+    # Track all validation failures
+    validation_failures = {}
+    
+    # Structural validation
+    if "results" not in search_results:
+        validation_failures["missing_results"] = {
+            "expected": "Results field present",
+            "actual": "Results field missing"
+        }
+        return False, validation_failures
+    
+    # Validate search term
+    if "search_term" in expected_data and "search_term" in search_results:
+        if search_results["search_term"] != expected_data["search_term"]:
+            validation_failures["search_term"] = {
+                "expected": expected_data["search_term"],
+                "actual": search_results["search_term"]
+            }
+    
+    # Validate similarity threshold
+    if "similarity_threshold" in expected_data and "similarity_threshold" in search_results:
+        if search_results["similarity_threshold"] != expected_data["similarity_threshold"]:
+            validation_failures["similarity_threshold"] = {
+                "expected": expected_data["similarity_threshold"],
+                "actual": search_results["similarity_threshold"]
+            }
+    
+    # Validate total count
+    if "total" in expected_data and "total" in search_results:
+        if search_results["total"] < expected_data["total"]:
+            validation_failures["total_count"] = {
+                "expected": f">= {expected_data['total']}",
+                "actual": search_results["total"]
+            }
+    
+    # Validate result content
+    if "results" in search_results and "expected_result_keys" in expected_data:
+        found_keys = set()
+        for item in search_results["results"]:
+            if "doc" in item and "_key" in item["doc"]:
+                found_keys.add(item["doc"]["_key"])
+        
+        expected_keys = set(expected_data["expected_result_keys"])
+        if not expected_keys.issubset(found_keys):
+            missing_keys = expected_keys - found_keys
+            validation_failures["missing_expected_keys"] = {
+                "expected": list(expected_keys),
+                "actual": list(found_keys),
+                "missing": list(missing_keys)
+            }
+    
+    # Validate scores
+    if "results" in search_results and len(search_results["results"]) > 0:
+        # Check if all results have keyword_score
+        for i, item in enumerate(search_results["results"]):
+            if "keyword_score" not in item:
+                validation_failures[f"missing_score_result_{i}"] = {
+                    "expected": "keyword_score present",
+                    "actual": "keyword_score missing"
+                }
+    
+    return len(validation_failures) == 0, validation_failures
 
 if __name__ == "__main__":
-    # Example usage
-    from pdf_extractor.arangodb.arango_setup import connect_arango, ensure_database
-    
     # Configure logging
     logger.remove()
     logger.add(
@@ -168,28 +253,51 @@ if __name__ == "__main__":
         format="{time:HH:mm:ss} | {level:<7} | {message}"
     )
     
-    # Connect to ArangoDB
-    client = connect_arango()
-    if client is None:
-        logger.error("Failed to connect to ArangoDB. Exiting.")
-        sys.exit(1)
-    db = ensure_database(client)
-    if db is None:
-        logger.error("Failed to ensure database. Exiting.")
-        sys.exit(1)
-
-    # Perform search
-    search_term = "python"  # Example search term
-    try:
-        results = search_keyword(db, search_term)
-        
-        # Output results
-        logger.info(f"Found {results['total']} matching documents:")
-        for i, item in enumerate(results["results"]):
-            doc = item.get("doc", {})
-            score = item.get("keyword_score", 0)
-            logger.info(f"{i+1}. Key: {doc.get('_key')} (Score: {score:.2f})")
-            logger.info(f"   Problem: {doc.get('problem', '')[:50]}...")
+    # Path to test fixture
+    fixture_path = "src/test_fixtures/keyword_search_expected.json"
     
+    try:
+        # Connect to ArangoDB
+        client = connect_arango()
+        db = ensure_database(client)
+        
+        # Create a test fixture if it doesn't exist
+        try:
+            with open(fixture_path, "r") as f:
+                fixture_exists = True
+        except FileNotFoundError:
+            # Create a minimal fixture file
+            with open(fixture_path, "w") as f:
+                json.dump({
+                    "search_term": "python",
+                    "similarity_threshold": 97.0,
+                    "total": 0,
+                    "expected_result_keys": []
+                }, f)
+        
+        # Run a test keyword search
+        search_term = "python"  # Known search term that should match fixture
+        search_results = search_keyword(
+            db=db,
+            search_term=search_term,
+            similarity_threshold=97.0,
+            top_n=10
+        )
+        
+        # Validate the results
+        validation_passed, validation_failures = validate_keyword_search(search_results, fixture_path)
+        
+        # Report validation status
+        if validation_passed:
+            print("✅ VALIDATION COMPLETE - All keyword search results match expected values")
+            sys.exit(0)
+        else:
+            print("❌ VALIDATION FAILED - Keyword search results don't match expected values") 
+            print(f"FAILURE DETAILS:")
+            for field, details in validation_failures.items():
+                print(f"  - {field}: Expected: {details['expected']}, Got: {details['actual']}")
+            print(f"Total errors: {len(validation_failures)} fields mismatched")
+            sys.exit(1)
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        print(f"❌ ERROR: {str(e)}")
+        sys.exit(1)

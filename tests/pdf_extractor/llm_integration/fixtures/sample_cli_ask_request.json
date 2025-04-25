@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "task_id": "cli_manual_test_Q0",
+      "question": "What is the capital of France?",
+      "metadata": {"source": "cli_manual_test"}
+    },
+    {
+      "task_id": "cli_manual_test_Q1",
+      "question": "Explain quantum mechanics simply.",
+      "metadata": {"source": "cli_manual_test"}
+    }
+  ]
+}

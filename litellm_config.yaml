@@ -1,0 +1,7 @@
+model_list:
+  - model_name: sglang/codellama-7b # This is the alias, what you'll call in your code
+    litellm_params:
+      model: openai/codellama-7b  # Use the correct provider prefix here; LiteLLM needs this
+      api_base: http://sglang:4000
+      api_key: "anything"
+      model_type: "openai"

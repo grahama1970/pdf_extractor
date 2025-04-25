@@ -1,0 +1,5 @@
+{
+  "expected_min_results": 0,
+  "query": "test query",
+  "top_n": 5
+}

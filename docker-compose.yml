@@ -1,8 +1,8 @@
 version: '3.8'
-
 services:
   # PDF Extractor application service
   pdf_extractor:
+    container_name: pdf_extractor
     build:
       context: .
       dockerfile: Dockerfile
@@ -32,16 +32,84 @@ services:
       - LABEL_STUDIO_URL=http://labelstudio:8080
     restart: unless-stopped
     networks:
-      - pdf-extraction-network
+      - pdf_extraction_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
       start_period: 40s
+  
+  # Code Execution Service
+  code_executor:
+    container_name: code_executor
+    build:
+      context: .
+      dockerfile: Dockerfile.code_executor
+    restart: unless-stopped
+    environment:
+      - EXECUTION_TIMEOUT=30
+      - MAX_MEMORY_MB=512
+      - ALLOWED_MODULES=numpy,pandas,matplotlib,scipy,sklearn
+    ports:
+      - "8000:8000"
+    networks:
+      - pdf_extraction_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # SGLang LLM Server
+  sglang:
+    container_name: sglang
+    image: lmsysorg/sglang:latest
+    shm_size: '32gb'
+    ports:
+      - "4000:4000"
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    command: >
+      python3 -m sglang.launch_server 
+      --model-path meta-llama/CodeLlama-7b-Instruct-hf 
+      --host 0.0.0.0 
+      --port 4000 
+      --trust-remote-code
+    restart: unless-stopped
+    networks:
+      - pdf_extraction_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # LiteLLM Proxy for unified OpenAI-compatible API
+  # litellm_proxy:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.litellm-proxy
+  #   container_name: litellm_proxy
+  #   ports:
+  #     - "4100:4000"
+  #   volumes:
+  #     - ./litellm_config.yaml:/config/litellm_config.yaml
+
+  #   depends_on:
+  #     - sglang
+  #   networks:
+  #     - pdf_extraction_network
 
   # Label Studio for annotation
   labelstudio:
+    container_name: labelstudio
     image: heartexlabs/label-studio:latest
     ports:
       - "8080:8080"
@@ -55,7 +123,7 @@ services:
       - LABEL_STUDIO_PASSWORD=${LABEL_STUDIO_PASSWORD}
     restart: unless-stopped
     networks:
-      - pdf-extraction-network
+      - pdf_extraction_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -63,8 +131,9 @@ services:
       retries: 3
       start_period: 40s
 
-  # Redis service for caching (without password for litellm compatibility)
+  # Redis service for caching
   redis:
+    container_name: redis
     image: redis:alpine
     restart: unless-stopped
     ports:
@@ -73,29 +142,26 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - pdf-extraction-network
+      - pdf_extraction_network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-   # Perplexity Ask Service
+  # Perplexity Ask Service
   perplexity_ask:
+    container_name: perplexity_ask
     image: mcp/perplexity-ask:latest
     restart: unless-stopped
     ports:
-      - "3000:3000"  # Change this if the container uses a different port
+      - "3000:3000"
     networks:
-      - pdf-extraction-network
-    # Uncomment and edit the following as needed:
-    # environment:
-    #   - SOME_ENV_VAR=value
-    # volumes:
-    #   - ./some-local-dir:/some-container-dir
+      - pdf_extraction_network
 
   # ArangoDB service for document storage
   arangodb:
+    container_name: arangodb
     image: arangodb/arangodb:latest
     restart: unless-stopped
     ports:
@@ -110,7 +176,7 @@ services:
       - arango_apps:/var/lib/arangodb3-apps
       - ./schemas:/schemas
     networks:
-      - pdf-extraction-network
+      - pdf_extraction_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8529/_api/version"]
       interval: 30s
@@ -125,12 +191,9 @@ volumes:
   redis_data:
   arango_data:
   arango_apps:
-  uploads:
-  output:
-  corrections:
-  extracted_data:
+  huggingface_cache:
 
 # Network for service communication
 networks:
-  pdf-extraction-network:
+  pdf_extraction_network:
     driver: bridge

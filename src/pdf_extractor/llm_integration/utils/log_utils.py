@@ -61,8 +61,13 @@ def truncate_large_value(
             else:
                 return "[<0 elements>]"
         else:
-            return value
+            # If list elements are dicts, truncate them recursively
+            return [truncate_large_value(item, max_str_len, max_list_elements_shown) if isinstance(item, dict) else item for item in value]
+    elif isinstance(value, dict): # Add explicit check for dict
+            # Recursively truncate values within dictionaries
+            return {k: truncate_large_value(v, max_str_len, max_list_elements_shown) for k, v in value.items()}
     else:
+        # Handle other types (int, float, bool, None, etc.) - return as is
         return value
 
 

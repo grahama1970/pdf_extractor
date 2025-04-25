@@ -1,25 +1,44 @@
+# src/pdf_extractor/arangodb/search_api/hybrid.py
+import json
+import time
+import sys
 from typing import List, Dict, Any, Optional, Tuple, Union
+from loguru import logger
 from arango.database import StandardDatabase
 from arango.exceptions import AQLQueryExecuteError, ArangoServerError
 
 # Import config variables and embedding utils
 # --- Configuration and Imports ---
 from pdf_extractor.arangodb.config import (
+    COLLECTION_NAME,
     SEARCH_FIELDS,
     ALL_DATA_FIELDS_PREVIEW,
     TEXT_ANALYZER,
-    TAG_ANALYZER,
     VIEW_NAME,
-    GRAPH_NAME,
 )
 from pdf_extractor.arangodb.embedding_utils import get_embedding
 from pdf_extractor.arangodb.search_api.bm25 import _fetch_bm25_candidates
 from pdf_extractor.arangodb.search_api.semantic import _fetch_semantic_candidates
-from pdf_extractor.arangodb.search_api.utils import validate_search_params
+from pdf_extractor.arangodb.arango_setup import connect_arango, ensure_database
+
+def validate_search_params(query_text, top_n, initial_k):
+    """Validate search parameters and set reasonable defaults."""
+    if not query_text:
+        query_text = ""  # Allow empty query
+    
+    if top_n <= 0:
+        top_n = 5  # Default to 5 results
+    
+    if initial_k <= 0:
+        initial_k = 20  # Default to 20 candidates
+    
+    return query_text, top_n, initial_k
 
 def hybrid_search(
     db: StandardDatabase,
     query_text: str,
+    collections: Optional[List[str]] = None,
+    filter_expr: Optional[str] = None,
     top_n: int = 5,
     initial_k: int = 20,
     bm25_threshold: float = 0.01,
@@ -34,6 +53,8 @@ def hybrid_search(
     Args:
         db: ArangoDB database connection.
         query_text: The user's search query.
+        collections: Optional list of collections to search in.
+        filter_expr: Optional AQL filter expression.
         top_n: The final number of ranked results to return.
         initial_k: Number of results to initially fetch from BM25 and Semantic searches.
         bm25_threshold: Minimum BM25 score for initial candidates.
@@ -63,6 +84,13 @@ def hybrid_search(
         
         if tag_conditions:
             tag_filter_clause = f" FILTER {' AND '.join(tag_conditions)}"
+    
+    # Add filter expression to tag_filter_clause if provided
+    if filter_expr:
+        if tag_filter_clause:
+            tag_filter_clause += f" AND ({filter_expr})"
+        else:
+            tag_filter_clause = f" FILTER {filter_expr}"
     
     try:
         # Get candidates from BM25 search
@@ -97,10 +125,16 @@ def hybrid_search(
         # Limit to top_n results
         final_results = combined_results[:top_n]
         
+        # Enhance results with collection information if provided
+        if collections and len(collections) > 0:
+            collection_name = collections[0]
+            for result in final_results:
+                result["collection"] = collection_name
+        
         return {
             "results": final_results,
             "count": len(final_results),
-            "total_candidates": len(combined_results),
+            "total": len(combined_results),
             "query": query_text,
             "bm25_time": bm25_time,
             "semantic_time": semantic_time,
@@ -112,7 +146,7 @@ def hybrid_search(
         return {
             "results": [],
             "count": 0,
-            "total_candidates": 0,
+            "total": 0,
             "query": query_text,
             "error": str(e)
         }
@@ -190,13 +224,142 @@ def reciprocal_rank_fusion(
     
     return result_list
 
-# For module testing
+def validate_hybrid_search(
+    search_results: Dict[str, Any], 
+    fixture_path: str
+) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
+    """
+    Validate hybrid search results against known good fixture data.
+    
+    Args:
+        search_results: The results returned from hybrid_search
+        fixture_path: Path to the fixture file containing expected results
+        
+    Returns:
+        Tuple of (validation_passed, validation_failures)
+    """
+    # Load fixture data
+    try:
+        with open(fixture_path, "r") as f:
+            expected_data = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load fixture data: {e}")
+        return False, {"fixture_loading_error": {"expected": "Valid JSON file", "actual": str(e)}}
+    
+    # Track all validation failures
+    validation_failures = {}
+    
+    # Structural validation
+    if "results" not in search_results:
+        validation_failures["missing_results"] = {
+            "expected": "Results field present",
+            "actual": "Results field missing"
+        }
+        return False, validation_failures
+    
+    # Validate result count
+    if "count" in expected_data and search_results.get("count") != expected_data.get("count"):
+        validation_failures["result_count"] = {
+            "expected": expected_data.get("count"),
+            "actual": search_results.get("count")
+        }
+    
+    # Validate total count
+    if "total" in expected_data and search_results.get("total") != expected_data.get("total"):
+        validation_failures["total_count"] = {
+            "expected": expected_data.get("total"),
+            "actual": search_results.get("total")
+        }
+    
+    # Validate the actual result data
+    expected_results = expected_data.get("results", [])
+    actual_results = search_results.get("results", [])
+    
+    # First check if we have the same number of results
+    if len(expected_results) != len(actual_results):
+        validation_failures["results_length"] = {
+            "expected": len(expected_results),
+            "actual": len(actual_results)
+        }
+    
+    # Now validate individual results
+    min_length = min(len(expected_results), len(actual_results))
+    for i in range(min_length):
+        expected_result = expected_results[i]
+        actual_result = actual_results[i]
+        
+        # Check document keys match
+        expected_key = expected_result.get("doc", {}).get("_key", "")
+        actual_key = actual_result.get("doc", {}).get("_key", "")
+        
+        if expected_key != actual_key:
+            validation_failures[f"result_{i}_doc_key"] = {
+                "expected": expected_key,
+                "actual": actual_key
+            }
+        
+        # Check RRF scores approximately match (floating point comparison)
+        if "rrf_score" in expected_result and "rrf_score" in actual_result:
+            expected_score = expected_result["rrf_score"]
+            actual_score = actual_result["rrf_score"]
+            
+            # Allow small differences in scores due to floating point precision
+            if abs(expected_score - actual_score) > 0.01:
+                validation_failures[f"result_{i}_rrf_score"] = {
+                    "expected": expected_score,
+                    "actual": actual_score
+                }
+        
+        # Check document content
+        for key in expected_result.get("doc", {}):
+            if key not in actual_result.get("doc", {}):
+                validation_failures[f"result_{i}_doc_missing_{key}"] = {
+                    "expected": f"{key} field present",
+                    "actual": f"{key} field missing"
+                }
+            elif actual_result["doc"][key] != expected_result["doc"][key]:
+                validation_failures[f"result_{i}_doc_{key}"] = {
+                    "expected": expected_result["doc"][key],
+                    "actual": actual_result["doc"][key]
+                }
+    
+    return len(validation_failures) == 0, validation_failures
+
 if __name__ == "__main__":
-    import json
-    import sys
+    # Configure logging
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     
-    # Run a simple test if imports succeed
-    print("✅ Hybrid search module imported successfully")
+    # Path to test fixture
+    fixture_path = "src/test_fixtures/hybrid_search_expected_20250422_181117.json"
     
-    # Exit with success
-    sys.exit(0)
+    try:
+        # Set up database connection
+        client = connect_arango()
+        db = ensure_database(client)
+        
+        # Run a test hybrid search
+        test_query = "python error"  # Known query that should match fixture results
+        search_results = hybrid_search(
+            db=db,
+            query_text=test_query,
+            top_n=3
+        )
+        
+        # Validate the results
+        validation_passed, validation_failures = validate_hybrid_search(search_results, fixture_path)
+        
+        # Report validation status
+        if validation_passed:
+            print("✅ VALIDATION COMPLETE - All hybrid search results match expected values")
+            sys.exit(0)
+        else:
+            print("❌ VALIDATION FAILED - Hybrid search results don't match expected values") 
+            print(f"FAILURE DETAILS:")
+            for field, details in validation_failures.items():
+                print(f"  - {field}: Expected: {details['expected']}, Got: {details['actual']}")
+            print(f"Total errors: {len(validation_failures)} fields mismatched")
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ ERROR: {str(e)}")
+        sys.exit(1)
