@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Service Json for Vertex
+vertex_ai_service_account.json
+
 # C extensions
 *.so
 
