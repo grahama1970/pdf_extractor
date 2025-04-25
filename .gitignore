@@ -148,3 +148,4 @@ tests/fixtures/
 task.md
 
 examples/
+src/pdf_extractor/vertex_ai_service_account.json
